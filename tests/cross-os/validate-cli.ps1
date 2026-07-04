@@ -70,7 +70,7 @@ try {
   }
 
   $detachedDir = Join-Path $tempRoot "detached"
-  $detachedStartJson = (& $CommandPath --json detached start --name cross --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('detached-ready', flush=True); time.sleep(300)" | Out-String)
+  $detachedStartJson = (& $CommandPath --json detached start --name cross --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('detached-ready', flush=True); time.sleep(30)" | Out-String)
   $detachedStart = $detachedStartJson | ConvertFrom-Json
   if (-not $detachedStart.ok -or $detachedStart.job.name -ne "cross" -or $detachedStart.job.status -ne "processing") {
     Fail "detached start did not return a processing job"
@@ -88,13 +88,13 @@ try {
   if (-not $detachedKill.ok -or $detachedKill.job.status -ne "killed" -or $detachedKill.killed -lt 1) {
     Fail "detached kill did not stop the started job: $($detachedKillJson.Trim())"
   }
-  $null = (& $CommandPath detached start --name plain --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; time.sleep(300)" | Out-String).Trim()
+  $null = (& $CommandPath detached start --name plain --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; time.sleep(30)" | Out-String).Trim()
   $plainKillOutput = (& $CommandPath detached kill --detached-dir $detachedDir plain | Out-String).Trim()
   if (-not [regex]::IsMatch($plainKillOutput, "^killed [1-9][0-9]* detached process\(es\)$")) {
     Fail "plain detached kill output was not stable: $plainKillOutput"
   }
-  $null = (& $CommandPath --json detached start --name replace-active --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; time.sleep(300)" | Out-String)
-  $replaceActiveJson = (& $CommandPath --json detached start --replace --name replace-active --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('bad')" | Out-String)
+  $null = (& $CommandPath --json detached start --name replace-active --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; time.sleep(30)" | Out-String)
+  $replaceActiveJson = (& $CommandPath --json detached start --replace --name replace-active --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('bad')" | Out-String)
   $replaceActiveCode = $LASTEXITCODE
   if ($replaceActiveCode -eq 0) {
     $null = (& $CommandPath --json detached kill --detached-dir $detachedDir replace-active | Out-String)
@@ -104,7 +104,7 @@ try {
     Fail "active detached replace did not explain the active job: $($replaceActiveJson.Trim())"
   }
   $null = (& $CommandPath --json detached kill --detached-dir $detachedDir replace-active | Out-String)
-  $null = (& $CommandPath --json detached start --name replace-done --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('first', flush=True)" | Out-String)
+  $null = (& $CommandPath --json detached start --name replace-done --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('first', flush=True)" | Out-String)
   $replaceDoneSeen = $false
   for ($attempt = 0; $attempt -lt 10; $attempt++) {
     $replaceDoneListJson = (& $CommandPath --json detached list --name replace-done --detached-dir $detachedDir | Out-String)
@@ -119,7 +119,7 @@ try {
   if (-not $replaceDoneSeen) {
     Fail "detached replacement setup did not reach completed status"
   }
-  $replaceDoneJson = (& $CommandPath --json detached start --name replace-done --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('bad')" | Out-String)
+  $replaceDoneJson = (& $CommandPath --json detached start --name replace-done --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "print('bad')" | Out-String)
   $replaceDoneCode = $LASTEXITCODE
   if ($replaceDoneCode -eq 0) {
     Fail "inactive detached job was replaced without --replace"
@@ -127,7 +127,7 @@ try {
   if (-not $replaceDoneJson.Contains("Use --replace after it is inactive")) {
     Fail "inactive detached replace did not require --replace: $($replaceDoneJson.Trim())"
   }
-  $null = (& $CommandPath --json detached start --replace --name replace-done --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('second', flush=True); time.sleep(300)" | Out-String)
+  $null = (& $CommandPath --json detached start --replace --name replace-done --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('second', flush=True); time.sleep(30)" | Out-String)
   $replaceDoneLog = Join-Path $detachedDir "replace-done.out.log"
   $replaceSecondSeen = $false
   for ($attempt = 0; $attempt -lt 5; $attempt++) {
