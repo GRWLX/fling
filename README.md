@@ -11,13 +11,15 @@ sudo sshfling -k s432
 sudo sshfling web
 sudo sshfling shutdown
 sudo sshfling -k
+sshfling s234@1.0.0.1
 ```
 
 If `--username` is omitted, `sshfling` creates a random temporary username like `s123`.
 
 Rules:
 
-- `sshfling`, `sshfling -t`, `sshfling shutdown`, and `sshfling -k` require root/admin.
+- `sshfling`, `sshfling -t`, `sshfling --password`, `sshfling shutdown`, and `sshfling -k` require root/admin.
+- `sshfling s234@1.0.0.1` is client connect mode and does not require root.
 - The maximum time is 1 hour.
 - `sshfling` with no `-t` uses the maximum: 1 hour.
 - Up to 10 active sshfling SSH sessions are allowed, depending on install policy.
@@ -58,6 +60,20 @@ Optional username:
 ```bash
 sudo sshfling -t 10m --username ticket-1234
 ```
+
+Password-based temporary access:
+
+```bash
+sudo sshfling --password -t 10m --username s234 --remote 1.0.0.1 --reload
+```
+
+That prints a one-time grant with a generated password and this client command:
+
+```bash
+sshfling s234@1.0.0.1
+```
+
+On the client side, run the command, press Enter, then type the printed password when OpenSSH prompts for it. `sshfling s234@1.0.0.1` is a small wrapper around `ssh` that prefers password authentication and lets OpenSSH handle the password prompt.
 
 Kill active sshfling SSH sessions:
 

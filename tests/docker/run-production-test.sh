@@ -49,6 +49,11 @@ grep -q -- "-k \\[USERNAME\\], --kill \\[USERNAME\\]" "$work/help.out"
 grep -q -- "s123" "$work/help.out"
 grep -q -- "list" "$work/help.out"
 grep -q -- "web" "$work/help.out"
+SSHFLING_CONNECT_DRY_RUN=1 bin/sshfling -p 2222 -o StrictHostKeyChecking=no s234@1.0.0.1 whoami >"$work/connect-dry-run.out"
+grep -q -- "PreferredAuthentications=password,keyboard-interactive" "$work/connect-dry-run.out"
+grep -q -- "PubkeyAuthentication=no" "$work/connect-dry-run.out"
+grep -q -- "-p 2222" "$work/connect-dry-run.out"
+grep -q -- "s234@1.0.0.1 whoami" "$work/connect-dry-run.out"
 
 log "install user-specific policy caps root connections at two"
 bin/sshfling policy install --user root --max-time 1h --max-connections 2 >"$work/policy.out"
@@ -195,6 +200,58 @@ ssh_base=(
 log "ssh login succeeds before expiry"
 "${ssh_base[@]}" 'whoami' >"$work/whoami.out"
 grep -q '^root$' "$work/whoami.out"
+
+log "password grant prints sshfling connect command and accepts password login"
+bin/sshfling --json --password -t 8s \
+  --username s234 \
+  --remote 127.0.0.1 >"$work/password-setup.json"
+python3 - "$work/password-setup.json" "$work/password.env" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["auth"] == "password"
+assert payload["username"] == "s234"
+assert payload["seconds"] == 8
+assert payload["ssh_command"] == "sshfling s234@127.0.0.1"
+assert payload["password"]
+with open(sys.argv[2], "w") as out:
+    out.write(f"SSHPASS={payload['password']}\n")
+PY
+# shellcheck source=/dev/null
+source "$work/password.env"
+grep -q "Match User s234" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
+grep -q "ForceCommand /usr/local/libexec/sshfling-session --max-seconds 8 --username s234 --login-user s234 --policy-file /etc/sshfling/policy.json --expires-at" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
+
+sshd -t
+kill "$sshd_pid"
+wait "$sshd_pid" 2>/dev/null || true
+/usr/sbin/sshd -D -e -p 2222 >"$work/sshd-password.log" 2>&1 &
+sshd_pid="$!"
+sleep 0.5
+
+SSHPASS="$SSHPASS" sshpass -e bin/sshfling \
+  -p 2222 \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  s234@127.0.0.1 \
+  'whoami' >"$work/password-whoami.out"
+grep -q '^s234$' "$work/password-whoami.out"
+
+sleep 9
+set +e
+SSHPASS="$SSHPASS" sshpass -e bin/sshfling \
+  -p 2222 \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  s234@127.0.0.1 \
+  'whoami' >"$work/password-expired.out" 2>"$work/password-expired.err"
+password_expired_code="$?"
+set -e
+if [[ "$password_expired_code" -eq 0 ]]; then
+  fail "expected expired password grant to reject ssh login"
+fi
+grep -q "Temporary SSH access expired" "$work/password-expired.err"
 
 log "list and kill named sessions with max connections policy"
 for name in s101 s102 s103; do

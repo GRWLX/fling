@@ -10,6 +10,7 @@ RUN apt-get update \
     openssl \
     procps \
     python3 \
+    sshpass \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/sshfling

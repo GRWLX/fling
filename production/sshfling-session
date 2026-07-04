@@ -7,6 +7,7 @@ max_allowed_connections=10
 username="unknown"
 login_user=""
 policy_file="/etc/sshfling/policy.json"
+expires_at=""
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -24,6 +25,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --policy-file)
       policy_file="${2:-}"
+      shift 2
+      ;;
+    --expires-at)
+      expires_at="${2:-}"
       shift 2
       ;;
     *)
@@ -77,6 +82,22 @@ fi
 if (( max_seconds > max_allowed_seconds )); then
   echo "Temporary SSH session limit cannot exceed ${max_allowed_seconds} seconds." >&2
   exit 2
+fi
+
+if [[ -n "$expires_at" ]]; then
+  if [[ ! "$expires_at" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Invalid --expires-at value." >&2
+    exit 2
+  fi
+  now="$(date +%s)"
+  if (( now >= expires_at )); then
+    echo "Temporary SSH access expired." >&2
+    exit 124
+  fi
+  remaining_seconds=$(( expires_at - now ))
+  if (( remaining_seconds < max_seconds )); then
+    max_seconds="$remaining_seconds"
+  fi
 fi
 
 status=0

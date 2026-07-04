@@ -122,6 +122,38 @@ def run(args, cwd=None, env=None, capture=False, check=True):
     return proc
 
 
+def run_with_input(args, input_text, cwd=None, env=None, capture=False, check=True):
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update({k: str(v) for k, v in env.items() if v is not None})
+
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            env=merged_env,
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise SSHFlingError(f"Missing command: {args[0]}", 127) from exc
+
+    if check and proc.returncode != 0:
+        details = {}
+        if capture:
+            details = {"stdout": proc.stdout, "stderr": proc.stderr}
+        raise SSHFlingError(
+            f"Command failed with exit code {proc.returncode}: {' '.join(args)}",
+            proc.returncode,
+            **details,
+        )
+
+    return proc
+
+
 def project_dir_from(args):
     return Path(args.project_dir).expanduser().resolve()
 
@@ -743,8 +775,178 @@ def random_username(prefix=DEFAULT_TEMP_USERNAME_PREFIX):
     return f"{prefix}{secrets.randbelow(1000):03d}"
 
 
+def is_ssh_connect_target(value):
+    if value.startswith("-") or "/" in value or value.count("@") != 1:
+        return False
+    user, host = value.split("@", 1)
+    return bool(user and host and not any(ch.isspace() for ch in value))
+
+
+def maybe_connect_argv(argv):
+    subcommands = {
+        "doctor",
+        "setup",
+        "shutdown",
+        "list",
+        "ca",
+        "cert",
+        "policy",
+        "host",
+        "serve",
+        "web",
+        "web-hash",
+        "init",
+        "key",
+        "network",
+        "server",
+        "client",
+        "test-timeout",
+        "compose",
+        "package",
+    }
+    for index, token in enumerate(argv):
+        if token == "--":
+            continue
+        if is_ssh_connect_target(token):
+            return argv[:index], token, argv[index + 1 :]
+        if not token.startswith("-"):
+            if token in subcommands:
+                return None
+    return None
+
+
+def cmd_connect(before_args, target, after_args):
+    ssh_bin = os.environ.get("SSHFLING_SSH_BIN", "ssh")
+    ssh_args = [
+        ssh_bin,
+        "-o",
+        "PreferredAuthentications=password,keyboard-interactive",
+        "-o",
+        "PubkeyAuthentication=no",
+    ] + before_args + [target] + after_args
+
+    if os.environ.get("SSHFLING_CONNECT_DRY_RUN"):
+        print(shlex.join(ssh_args))
+        return 0
+
+    try:
+        os.execvp(ssh_bin, ssh_args)
+    except FileNotFoundError as exc:
+        raise SSHFlingError(f"Missing command: {ssh_bin}", 127) from exc
+
+
+def validate_unix_username(username):
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        raise SSHFlingError(
+            "Password mode requires a Linux username matching [a-z_][a-z0-9_-]{0,31}.",
+            2,
+            username=username,
+        )
+
+
+def set_user_password(username, password):
+    run_with_input(["chpasswd"], f"{username}:{password}\n", capture=True)
+
+
+def ensure_unix_user(username):
+    if run(["id", "-u", username], capture=True, check=False).returncode == 0:
+        return {"user": username, "created": False}
+    run(["useradd", "--create-home", "--shell", "/bin/bash", username])
+    return {"user": username, "created": True}
+
+
+def password_grant_config(username, seconds, expires_at, session_wrapper, policy_file):
+    return f"""# Managed by sshfling password grant for {username}.
+Match User {username}
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication no
+    AuthenticationMethods password
+    ForceCommand {session_wrapper} --max-seconds {seconds} --username {username} --login-user {username} --policy-file {policy_file} --expires-at {expires_at}
+    AllowTcpForwarding no
+    X11Forwarding no
+    PermitTunnel no
+"""
+
+
+def cmd_setup_password(args):
+    require_root("temporary password SSH access")
+    if not args.username:
+        args.username = random_username()
+    validate_unix_username(args.username)
+
+    policy = load_policy(args.policy_file)
+    active_policy = effective_policy(policy, args.username)
+    seconds = lifetime_seconds(args, active_policy["max_time_seconds"])
+    if seconds <= 0:
+        raise SSHFlingError("Password lifetime must be positive.", 2)
+    if seconds > active_policy["max_time_seconds"]:
+        raise SSHFlingError(f"Password lifetime cannot exceed {format_duration(active_policy['max_time_seconds'])}.", 2)
+
+    expires_at = int(time.time()) + seconds
+    password = secrets.token_urlsafe(18)
+    if args.dry_run:
+        user_result = {"user": args.username, "created": run(["id", "-u", args.username], capture=True, check=False).returncode != 0, "dry_run": True}
+    else:
+        user_result = ensure_unix_user(args.username)
+        set_user_password(args.username, password)
+
+    wrapper_path = Path(args.session_wrapper).expanduser()
+    config_dir = Path(args.password_sshd_config_dir).expanduser()
+    config_path = config_dir / f"91-sshfling-password-{args.username}.conf"
+    config = password_grant_config(args.username, seconds, expires_at, str(wrapper_path), args.policy_file)
+
+    results = [
+        install_file(resource_file("production/sshfling-session"), wrapper_path, 0o755, args.dry_run),
+        write_if_changed(config_path, config, 0o644, args.dry_run),
+        user_result,
+    ]
+
+    if not args.dry_run and args.validate:
+        run(["sshd", "-t"], capture=True)
+        results.append({"validated": "sshd -t"})
+
+    if not args.dry_run and args.reload:
+        if command_path("systemctl"):
+            proc = run(["systemctl", "reload", "sshd"], capture=True, check=False)
+            if proc.returncode != 0:
+                proc = run(["systemctl", "reload", "ssh"], capture=True, check=False)
+            if proc.returncode != 0:
+                raise SSHFlingError("Could not reload sshd with systemctl.", proc.returncode, stderr=proc.stderr)
+            results.append({"reloaded": "sshd"})
+        else:
+            raise SSHFlingError("systemctl is not available; reload sshd manually.", 127)
+
+    remote = args.remote or "REMOTE_HOST"
+    payload = {
+        "ok": True,
+        "auth": "password",
+        "username": args.username,
+        "password": password,
+        "seconds": seconds,
+        "expires_at": expires_at,
+        "expires_at_utc": dt.datetime.fromtimestamp(expires_at, dt.UTC).isoformat(),
+        "ssh_command": f"sshfling {args.username}@{remote}",
+        "results": results,
+    }
+
+    if args.json:
+        emit_json(payload)
+    else:
+        print(f"username: {payload['username']}")
+        print(f"password: {payload['password']}")
+        print(f"time: {seconds}s")
+        print(f"expires: {payload['expires_at_utc']}")
+        print(f"connect: {payload['ssh_command']}")
+        if not args.reload:
+            print("reload: reload sshd before using this grant if it is not already reloaded")
+    return 0
+
+
 def cmd_setup(args):
     require_root("temporary SSH access")
+    if getattr(args, "password", False):
+        return cmd_setup_password(args)
     if not args.username:
         args.username = random_username()
     ca_key = Path(args.ca_key).expanduser().resolve()
@@ -1721,6 +1923,7 @@ def build_parser():
   sudo sshfling web
   sudo sshfling shutdown
   sudo sshfling -k
+  sshfling s234@1.0.0.1
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1730,6 +1933,7 @@ def build_parser():
     parser.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123.")
     parser.add_argument("--login-user", help="Actual Unix login account if different from --username.")
     parser.add_argument("--remote", help="Remote host to print in the suggested ssh command.")
+    parser.add_argument("--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
     parser.add_argument("-k", "--kill", nargs="?", const=True, metavar="USERNAME", help="Kill active sshfling SSH session(s), optionally by name like s432.")
     parser.add_argument(
         "--project-dir",
@@ -1745,7 +1949,12 @@ def build_parser():
     parser.add_argument("--source-address", help=argparse.SUPPRESS)
     parser.add_argument("--session-wrapper", default=DEFAULT_SESSION_WRAPPER, help=argparse.SUPPRESS)
     parser.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help=argparse.SUPPRESS)
+    parser.add_argument("--password-sshd-config-dir", default="/etc/ssh/sshd_config.d", help=argparse.SUPPRESS)
+    parser.add_argument("--no-validate", dest="validate", action="store_false", help=argparse.SUPPRESS)
+    parser.add_argument("--reload", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-pty", action="store_true", help=argparse.SUPPRESS)
+    parser.set_defaults(validate=True)
 
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -1757,6 +1966,7 @@ def build_parser():
     setup.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123.")
     setup.add_argument("--login-user", help="Actual Unix login account if different from --username.")
     setup.add_argument("--remote", help="Remote host to print in the suggested ssh command.")
+    setup.add_argument("--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
     setup.add_argument("--ca-key", default=str(default_ca_key_path()), help="CA private key path.")
     setup.add_argument("--public-key", help="Public key text to sign.")
     setup.add_argument("--public-key-file", help="Public key file to sign. If omitted, sshfling generates a temporary keypair.")
@@ -1766,8 +1976,12 @@ def build_parser():
     setup.add_argument("--source-address", help="Optional CIDR source-address certificate restriction.")
     setup.add_argument("--session-wrapper", default=DEFAULT_SESSION_WRAPPER, help="Forced command wrapper path on target hosts.")
     setup.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help=argparse.SUPPRESS)
+    setup.add_argument("--password-sshd-config-dir", default="/etc/ssh/sshd_config.d", help=argparse.SUPPRESS)
+    setup.add_argument("--no-validate", dest="validate", action="store_false", help="Skip sshd -t validation in password mode.")
+    setup.add_argument("--reload", action="store_true", help="Reload sshd after writing password-mode config.")
+    setup.add_argument("--dry-run", action="store_true", help="Show intended password-mode changes without writing files.")
     setup.add_argument("--no-pty", action="store_true", help="Do not permit interactive PTY sessions.")
-    setup.set_defaults(func=cmd_setup)
+    setup.set_defaults(func=cmd_setup, validate=True)
 
     shutdown = subparsers.add_parser("shutdown", help="Kill active sshfling SSH session(s).")
     shutdown.add_argument("session_username", nargs="?", help="SSHFling session name to kill, for example s432.")
@@ -1934,6 +2148,18 @@ def normalize_init_path(args):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    connect_args = maybe_connect_argv(argv)
+    if connect_args:
+        before_args, target, after_args = connect_args
+        try:
+            return cmd_connect(before_args, target, after_args)
+        except SSHFlingError as exc:
+            eprint(f"sshfling: {exc.message}")
+            if exc.details.get("stderr"):
+                eprint(exc.details["stderr"].rstrip())
+            return exc.code
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
