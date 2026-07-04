@@ -2,7 +2,7 @@ PREFIX ?= $(HOME)/.local
 VERSION ?= 0.1.11
 TEMPLATE_DIR := $(PREFIX)/share/sshfling/templates
 
-.PHONY: install-local uninstall-local test package package-deb package-rpm package-msi package-pkg clean
+.PHONY: install-local uninstall-local test test-containers package package-deb package-rpm package-msi package-pkg clean
 
 install-local:
 	install -d "$(PREFIX)/bin" "$(TEMPLATE_DIR)/scripts" "$(TEMPLATE_DIR)/secrets" "$(TEMPLATE_DIR)/ssh-client" "$(TEMPLATE_DIR)/ssh-server" "$(TEMPLATE_DIR)/production" "$(TEMPLATE_DIR)/systemd"
@@ -28,6 +28,9 @@ test:
 	sh tests/cross-os/validate-cli.sh ./bin/sshfling "$(VERSION)"
 	docker compose -f compose.server.yml config >/dev/null
 	docker compose -f compose.client.yml config >/dev/null
+
+test-containers:
+	SSHFLING_VERSION="$(VERSION)" bash tests/docker/run-container-image-tests.sh
 
 package: package-deb package-rpm package-msi package-pkg
 

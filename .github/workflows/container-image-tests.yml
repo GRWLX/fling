@@ -1,0 +1,42 @@
+name: Container image tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package and validate."
+        required: false
+        default: "0.1.11"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  container-images:
+    name: Pull, build, install, and validate container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install package build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev file rpm createrepo-c openssh-client
+
+      - name: Run container image tests
+        env:
+          SSHFLING_VERSION: ${{ github.event.inputs.version || '' }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${SSHFLING_VERSION}" ]]; then
+            make test-containers VERSION="${SSHFLING_VERSION}"
+          else
+            make test-containers
+          fi
