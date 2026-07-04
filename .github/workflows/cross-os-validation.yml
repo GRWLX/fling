@@ -314,7 +314,7 @@ jobs:
           release: ${{ matrix.release }}
           usesh: true
           prepare: |
-            pkg install -y curl python3 openssh-portable
+            pkg install -y curl python3
           run: |
             set -eu
             workspace="$(pwd)"
