@@ -270,7 +270,7 @@ jobs:
       - name: Install published pkg
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/GRWLX/sshfling/releases/download/v${{ inputs.version }}/sshfling-${{ inputs.version }}.pkg" -o /tmp/sshfling.pkg
+          curl -fsSL "https://grwlx.github.io/sshfling/downloads/sshfling-${{ inputs.version }}.pkg" -o /tmp/sshfling.pkg
           sudo installer -pkg /tmp/sshfling.pkg -target /
           /usr/local/bin/sshfling --version | grep -q "sshfling ${{ inputs.version }}"
           /usr/local/bin/sshfling --version
@@ -301,7 +301,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $version = "${{ inputs.version }}"
           $msi = Join-Path $env:TEMP "sshfling-$version.msi"
-          Invoke-WebRequest -Uri "https://github.com/GRWLX/sshfling/releases/download/v$version/sshfling-$version.msi" -OutFile $msi
+          Invoke-WebRequest -Uri "https://grwlx.github.io/sshfling/downloads/sshfling-$version.msi" -OutFile $msi
           Start-Process msiexec.exe -Wait -ArgumentList "/i", $msi, "/qn", "/norestart"
           $candidates = @(
             (Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"),
@@ -329,7 +329,7 @@ jobs:
           $version = "${{ inputs.version }}"
           $zip = Join-Path $env:TEMP "sshfling-$version-windows.zip"
           $dest = Join-Path $env:TEMP "sshfling-zip"
-          Invoke-WebRequest -Uri "https://github.com/GRWLX/sshfling/releases/download/v$version/sshfling-$version-windows.zip" -OutFile $zip
+          Invoke-WebRequest -Uri "https://grwlx.github.io/sshfling/downloads/sshfling-$version-windows.zip" -OutFile $zip
           Expand-Archive -Force $zip -DestinationPath $dest
           $cmd = Join-Path $dest "sshfling.cmd"
           $output = & $cmd --version
