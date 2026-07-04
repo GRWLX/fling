@@ -443,7 +443,9 @@ do_install() {
 	vlicense LICENSE
 	vdoc README.md
 	vmkdir usr/share/sshfling/templates
-	vcopy ".env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd" usr/share/sshfling/templates
+	for path in .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd; do
+		vcopy "\$path" usr/share/sshfling/templates
+	done
 }
 VOID
 

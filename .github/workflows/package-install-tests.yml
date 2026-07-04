@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version to install-test."
         required: true
-        default: "0.1.8"
+        default: "0.1.9"
         type: string
 
 permissions:
@@ -39,22 +39,22 @@ jobs:
           - name: fedora
             image: fedora:latest
             command: |
-              printf '%s\n' '[sshfling]' 'name=SSHFling' 'baseurl=https://grwlx.github.io/sshfling/rpm' 'enabled=1' 'gpgcheck=0' >/etc/yum.repos.d/sshfling.repo
+              printf "%s\n" "[sshfling]" "name=SSHFling" "baseurl=https://grwlx.github.io/sshfling/rpm" "enabled=1" "gpgcheck=0" >/etc/yum.repos.d/sshfling.repo
               dnf install -y sshfling >/dev/null
           - name: rocky
             image: rockylinux:9
             command: |
-              printf '%s\n' '[sshfling]' 'name=SSHFling' 'baseurl=https://grwlx.github.io/sshfling/rpm' 'enabled=1' 'gpgcheck=0' >/etc/yum.repos.d/sshfling.repo
+              printf "%s\n" "[sshfling]" "name=SSHFling" "baseurl=https://grwlx.github.io/sshfling/rpm" "enabled=1" "gpgcheck=0" >/etc/yum.repos.d/sshfling.repo
               dnf install -y sshfling >/dev/null
           - name: alma
             image: almalinux:9
             command: |
-              printf '%s\n' '[sshfling]' 'name=SSHFling' 'baseurl=https://grwlx.github.io/sshfling/rpm' 'enabled=1' 'gpgcheck=0' >/etc/yum.repos.d/sshfling.repo
+              printf "%s\n" "[sshfling]" "name=SSHFling" "baseurl=https://grwlx.github.io/sshfling/rpm" "enabled=1" "gpgcheck=0" >/etc/yum.repos.d/sshfling.repo
               dnf install -y sshfling >/dev/null
           - name: ubi
             image: registry.access.redhat.com/ubi9/ubi
             command: |
-              printf '%s\n' '[sshfling]' 'name=SSHFling' 'baseurl=https://grwlx.github.io/sshfling/rpm' 'enabled=1' 'gpgcheck=0' >/etc/yum.repos.d/sshfling.repo
+              printf "%s\n" "[sshfling]" "name=SSHFling" "baseurl=https://grwlx.github.io/sshfling/rpm" "enabled=1" "gpgcheck=0" >/etc/yum.repos.d/sshfling.repo
               dnf install -y sshfling >/dev/null
     steps:
       - name: Install and check ${{ matrix.name }}
@@ -277,7 +277,11 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL https://grwlx.github.io/sshfling/homebrew/sshfling.rb -o /tmp/sshfling.rb
-          brew install --formula /tmp/sshfling.rb
+          brew tap-new grwlx/sshfling-test
+          tap_dir="$(brew --repository grwlx/sshfling-test)"
+          mkdir -p "$tap_dir/Formula"
+          cp /tmp/sshfling.rb "$tap_dir/Formula/sshfling.rb"
+          brew install grwlx/sshfling-test/sshfling
           sshfling --version | grep -q "sshfling ${{ inputs.version }}"
           sshfling --version
 
@@ -293,7 +297,15 @@ jobs:
           $msi = Join-Path $env:TEMP "sshfling-$version.msi"
           Invoke-WebRequest -Uri "https://github.com/GRWLX/sshfling/releases/download/v$version/sshfling-$version.msi" -OutFile $msi
           Start-Process msiexec.exe -Wait -ArgumentList "/i", $msi, "/qn", "/norestart"
-          $cmd = Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"
+          $candidates = @(
+            (Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"),
+            (Join-Path ${env:ProgramFiles(x86)} "SSHFling\sshfling.cmd")
+          )
+          $cmd = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $cmd) {
+            Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)} -Filter sshfling.cmd -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "Installed sshfling.cmd was not found"
+          }
           $output = & $cmd --version
           if ($output -ne "sshfling $version") {
             throw "Unexpected version output: $output"
