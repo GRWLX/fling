@@ -19,21 +19,29 @@ the pfSense and OPNsense substrates that public CI can boot:
 
 | FreeBSD substrate | Firewall release coverage | CI status |
 | --- | --- | --- |
+| FreeBSD 12.4 | pfSense Plus 22.x, pfSense CE 2.6.x, and OPNsense HardenedBSD/FreeBSD 12.x-era releases | Nearest public 12.x runner smoke, not exact |
 | FreeBSD 13.2 | OPNsense 23.x, OPNsense 24.1, and Business 24.4 | Matching FreeBSD VM coverage |
+| FreeBSD 13.3 | no direct pfSense/OPNsense release mapping found | Public 13.x continuity smoke |
+| FreeBSD 13.4 | no direct pfSense/OPNsense release mapping found | Public 13.x continuity smoke |
+| FreeBSD 13.5 | no direct pfSense/OPNsense release mapping found | Public 13.x continuity smoke |
 | FreeBSD 14.0 | pfSense CE 2.7.x and pfSense Plus 23.x | Major/minor VM coverage for the 14.0-CURRENT line |
 | FreeBSD 14.1 | OPNsense 24.7 and Business 24.10 | Matching FreeBSD VM coverage |
 | FreeBSD 14.2 | OPNsense 25.1 and Business 25.4 | Matching FreeBSD VM coverage |
 | FreeBSD 14.3 | OPNsense 25.7, 26.1, Business 25.10, and Business 26.4 | Matching FreeBSD VM coverage |
+| FreeBSD 14.4 | no direct pfSense/OPNsense release mapping found | Public 14.x continuity smoke |
 | FreeBSD 15.0 | pfSense CE 2.8.x, pfSense Plus 24.x, and pfSense Plus 25.07 | Major/minor VM coverage for the 15.0-CURRENT line |
 | FreeBSD 15.1 | OPNsense 26.7 tracking target | Tracking VM coverage |
 | FreeBSD 16.0-CURRENT | pfSense Plus 25.11/26.x and planned pfSense CE 2.9.x | Public runner gap |
-| FreeBSD 12.x and older | older unsupported pfSense and OPNsense lines | Not covered |
+| FreeBSD 11.x and older | older unsupported pfSense and OPNsense lines | Not covered |
 
 The tests install `sshfling` from the public source release, run the portable
 CLI contract, and exercise `sshfling host install --dry-run --no-validate` with
 certificate-mode paths. This validates command parsing, JSON output, password
 hashing, SSH connect dry-run behavior, template initialization, and host
 configuration rendering without modifying a firewall appliance.
+
+The complete version index found in the vendor documentation is tracked in
+[firewall-os-versions.md](firewall-os-versions.md).
 
 ## pfSense Cross-Reference
 
@@ -42,18 +50,19 @@ The SSHFling CI mapping is:
 
 | pfSense family | Vendor FreeBSD base | SSHFling validation |
 | --- | --- | --- |
-| pfSense Plus 26.x | 16.0-CURRENT | Not in public CI yet |
+| pfSense Plus 26.07 / 26.03.x | 16.0-CURRENT | Not in public CI yet |
 | pfSense Plus 25.11.x | 16.0-CURRENT | Not in public CI yet |
 | pfSense Plus 25.07.x | 15.0-CURRENT | FreeBSD 15.0 VM |
 | pfSense Plus 24.x | 15.0-CURRENT | FreeBSD 15.0 VM |
 | pfSense Plus 23.x | 14.0-CURRENT | FreeBSD 14.0 VM |
-| pfSense Plus 22.x | 12.3-STABLE | Not in public CI |
-| pfSense Plus 21.x | 12.2-STABLE | Not in public CI |
+| pfSense Plus 22.x | 12.3-STABLE | FreeBSD 12.4 nearest 12.x smoke, not exact |
+| pfSense Plus 21.x | 12.2-STABLE | FreeBSD 12.4 nearest 12.x smoke, not exact |
 | pfSense CE 2.9.x | 16.0-CURRENT planned | Not in public CI yet |
 | pfSense CE 2.8.x | 15.0-CURRENT | FreeBSD 15.0 VM |
 | pfSense CE 2.7.x | 14.0-CURRENT | FreeBSD 14.0 VM |
-| pfSense CE 2.6.x | 12.3-STABLE | Not in public CI |
-| pfSense CE 2.5.x | 12.2-STABLE | Not in public CI |
+| pfSense CE 2.6.x | 12.3-STABLE | FreeBSD 12.4 nearest 12.x smoke, not exact |
+| pfSense CE 2.5.x | 12.2-STABLE | FreeBSD 12.4 nearest 12.x smoke, not exact |
+| pfSense CE 2.4.x and older | 11.x, 10.x, 8.x, 7.x, or 6.x | Not in public CI |
 
 ## OPNsense Cross-Reference
 
@@ -72,8 +81,9 @@ families to FreeBSD bases. The SSHFling CI mapping is:
 | Business 24.10 | 14.1 | FreeBSD 14.1 VM |
 | Community 24.1 / Business 24.4 | 13.2 | FreeBSD 13.2 VM |
 | Community 23.x / Business 23.x | 13.x | FreeBSD 13.2 VM as nearest public 13.x coverage |
-| Community/Business 22.x | 13.0 to 13.1 | Not in public CI; nearest public runner smoke starts at FreeBSD 13.2 |
-| Community/Business 21.x and older | 12.x, 11.x, 10.x, or HardenedBSD-era bases | Not in public CI |
+| Community/Business 22.x | 13.0 to 13.1 | FreeBSD 13.2 VM as nearest public 13.x coverage |
+| Community/Business 20.x to 21.x | HardenedBSD/FreeBSD 12.x-era bases | FreeBSD 12.4 nearest 12.x smoke, not exact |
+| Community/Business 19.x and older | 11.x, 10.x, or HardenedBSD-era bases | Not in public CI |
 
 ## Operational Boundary
 

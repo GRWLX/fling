@@ -292,8 +292,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: pfsense-plus-22-ce-2.6-opnsense-12x-nearest-freebsd-12.4
+            release: "12.4"
           - name: opnsense-23.x-24.1-freebsd-13.2
             release: "13.2"
+          - name: freebsd-13.3-firewall-continuity
+            release: "13.3"
+          - name: freebsd-13.4-firewall-continuity
+            release: "13.4"
+          - name: freebsd-13.5-firewall-continuity
+            release: "13.5"
           - name: pfsense-ce-2.7-plus-23-freebsd-14.0
             release: "14.0"
           - name: opnsense-24.7-business-24.10-freebsd-14.1
@@ -302,6 +310,8 @@ jobs:
             release: "14.2"
           - name: opnsense-25.7-26.1-freebsd-14.3
             release: "14.3"
+          - name: freebsd-14.4-firewall-continuity
+            release: "14.4"
           - name: pfsense-ce-2.8-plus-24-25.07-freebsd-15.0
             release: "15.0"
           - name: opnsense-26.7-tracking-freebsd-15.1
@@ -314,7 +324,20 @@ jobs:
           release: ${{ matrix.release }}
           usesh: true
           prepare: |
-            pkg install -y curl python3
+            set -eu
+            pkg update -f || true
+            if ! pkg install -y curl python3; then
+              pkg install -y curl python39
+            fi
+            if ! command -v python3 >/dev/null 2>&1; then
+              for py in /usr/local/bin/python3.12 /usr/local/bin/python3.11 /usr/local/bin/python3.10 /usr/local/bin/python3.9; do
+                if [ -x "$py" ]; then
+                  ln -sf "$py" /usr/local/bin/python3
+                  break
+                fi
+              done
+            fi
+            python3 --version
           run: |
             set -eu
             workspace="$(pwd)"
