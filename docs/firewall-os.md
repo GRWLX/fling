@@ -8,8 +8,9 @@ such as `useradd` and `chpasswd`.
 
 This document cross-references vendor firewall releases to the FreeBSD
 substrates we can validate in public GitHub Actions. These tests validate the
-portable SSHFling runtime against matching FreeBSD bases; they do not claim to
-boot vendor appliance images or exercise firewall GUI-managed configuration.
+portable SSHFling runtime against matching FreeBSD bases, or matching
+major/minor FreeBSD lines for vendor `CURRENT` builds; they do not claim to boot
+vendor appliance images or exercise firewall GUI-managed configuration.
 
 ## CI Substrate Matrix
 
@@ -18,12 +19,12 @@ the pfSense and OPNsense substrates that public CI can boot:
 
 | FreeBSD substrate | Firewall release coverage | CI status |
 | --- | --- | --- |
-| FreeBSD 13.2 | OPNsense 23.x and 24.1-era FreeBSD 13.x lines | Exact FreeBSD VM coverage |
-| FreeBSD 14.0 | pfSense CE 2.7.x and pfSense Plus 23.x | Exact FreeBSD VM coverage |
-| FreeBSD 14.1 | OPNsense 24.7 and Business 24.10 | Exact FreeBSD VM coverage |
-| FreeBSD 14.2 | OPNsense 25.1 and Business 25.4 | Exact FreeBSD VM coverage |
-| FreeBSD 14.3 | OPNsense 25.7, 26.1, Business 25.10, and Business 26.4 | Exact FreeBSD VM coverage |
-| FreeBSD 15.0 | pfSense CE 2.8.x, pfSense Plus 24.x, and pfSense Plus 25.07 | Exact FreeBSD VM coverage for the 15.0 line |
+| FreeBSD 13.2 | OPNsense 23.x, OPNsense 24.1, and Business 24.4 | Matching FreeBSD VM coverage |
+| FreeBSD 14.0 | pfSense CE 2.7.x and pfSense Plus 23.x | Major/minor VM coverage for the 14.0-CURRENT line |
+| FreeBSD 14.1 | OPNsense 24.7 and Business 24.10 | Matching FreeBSD VM coverage |
+| FreeBSD 14.2 | OPNsense 25.1 and Business 25.4 | Matching FreeBSD VM coverage |
+| FreeBSD 14.3 | OPNsense 25.7, 26.1, Business 25.10, and Business 26.4 | Matching FreeBSD VM coverage |
+| FreeBSD 15.0 | pfSense CE 2.8.x, pfSense Plus 24.x, and pfSense Plus 25.07 | Major/minor VM coverage for the 15.0-CURRENT line |
 | FreeBSD 15.1 | OPNsense 26.7 tracking target | Tracking VM coverage |
 | FreeBSD 16.0-CURRENT | pfSense Plus 25.11/26.x and planned pfSense CE 2.9.x | Public runner gap |
 | FreeBSD 12.x and older | older unsupported pfSense and OPNsense lines | Not covered |
@@ -69,9 +70,9 @@ families to FreeBSD bases. The SSHFling CI mapping is:
 | Business 25.4 | 14.2 | FreeBSD 14.2 VM |
 | Community 24.7 | 14.1 | FreeBSD 14.1 VM |
 | Business 24.10 | 14.1 | FreeBSD 14.1 VM |
-| Community 24.1 / Business 24.4 | 13.2 to 14.1 transition | FreeBSD 13.2 and 14.1 VMs |
-| Community 23.x / Business 23.x | 13.x | FreeBSD 13.2 VM |
-| Community/Business 22.x | 13.0 to 13.1 | FreeBSD 13.2 VM as oldest public runner coverage |
+| Community 24.1 / Business 24.4 | 13.2 | FreeBSD 13.2 VM |
+| Community 23.x / Business 23.x | 13.x | FreeBSD 13.2 VM as nearest public 13.x coverage |
+| Community/Business 22.x | 13.0 to 13.1 | Not in public CI; nearest public runner smoke starts at FreeBSD 13.2 |
 | Community/Business 21.x and older | 12.x, 11.x, 10.x, or HardenedBSD-era bases | Not in public CI |
 
 ## Operational Boundary
@@ -117,6 +118,12 @@ sudo sshfling host install --dry-run --no-validate \
   https://docs.opnsense.org/CE_releases.html
 - OPNsense Business Edition release index:
   https://docs.opnsense.org/BE_releases.html
+- OPNsense 24.1 release notes, FreeBSD 13.2:
+  https://docs.opnsense.org/releases/CE_24.1.html
+- OPNsense 24.7 release notes, FreeBSD 14.1:
+  https://docs.opnsense.org/releases/CE_24.7.html
+- OPNsense Business 24.4 release notes, based on Community 24.1.x:
+  https://docs.opnsense.org/releases/BE_24.4.html
 - OPNsense 25.1 release notes, FreeBSD 14.2:
   https://docs.opnsense.org/releases/CE_25.1.html
 - OPNsense 25.7 release notes, FreeBSD 14.3:

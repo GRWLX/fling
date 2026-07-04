@@ -292,17 +292,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: opnsense-23.x-freebsd-13.2
+          - name: opnsense-23.x-24.1-freebsd-13.2
             release: "13.2"
-          - name: pfsense-ce-2.7-freebsd-14.0
+          - name: pfsense-ce-2.7-plus-23-freebsd-14.0
             release: "14.0"
-          - name: opnsense-24.x-freebsd-14.1
+          - name: opnsense-24.7-business-24.10-freebsd-14.1
             release: "14.1"
           - name: opnsense-25.1-freebsd-14.2
             release: "14.2"
           - name: opnsense-25.7-26.1-freebsd-14.3
             release: "14.3"
-          - name: pfsense-ce-2.8-plus-25.07-freebsd-15.0
+          - name: pfsense-ce-2.8-plus-24-25.07-freebsd-15.0
             release: "15.0"
           - name: opnsense-26.7-tracking-freebsd-15.1
             release: "15.1"
