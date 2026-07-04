@@ -70,7 +70,7 @@ try {
   }
 
   $detachedDir = Join-Path $tempRoot "detached"
-  $detachedStartJson = (& $CommandPath --json detached start --name cross --time 30s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('detached-ready', flush=True); time.sleep(30)" | Out-String)
+  $detachedStartJson = (& $CommandPath --json detached start --name cross --time 300s --cwd $tempRoot --detached-dir $detachedDir -- python -c "import time; print('detached-ready', flush=True); time.sleep(300)" | Out-String)
   $detachedStart = $detachedStartJson | ConvertFrom-Json
   if (-not $detachedStart.ok -or $detachedStart.job.name -ne "cross" -or $detachedStart.job.status -ne "processing") {
     Fail "detached start did not return a processing job"
