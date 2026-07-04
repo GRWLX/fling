@@ -209,6 +209,30 @@ do-install:
 	\${INSTALL_DATA} \${WRKSRC}/packaging/policy.json \${STAGEDIR}\${PREFIX}/etc/sshfling/policy.json.sample
 	\${MKDIR} \${STAGEDIR}\${DOCSDIR}
 	\${INSTALL_DATA} \${WRKSRC}/README.md \${WRKSRC}/LICENSE \${STAGEDIR}\${DOCSDIR}/
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/scripts
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/secrets
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-client
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-server
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/production
+	\${MKDIR} \${STAGEDIR}\${PREFIX}/share/sshfling/templates/systemd
+	\${INSTALL_DATA} \${WRKSRC}/.env.example \${STAGEDIR}\${PREFIX}/share/sshfling/templates/.env.example
+	\${INSTALL_DATA} \${WRKSRC}/LICENSE \${STAGEDIR}\${PREFIX}/share/sshfling/templates/LICENSE
+	\${INSTALL_DATA} \${WRKSRC}/README.md \${STAGEDIR}\${PREFIX}/share/sshfling/templates/README.md
+	\${INSTALL_DATA} \${WRKSRC}/compose.server.yml \${STAGEDIR}\${PREFIX}/share/sshfling/templates/compose.server.yml
+	\${INSTALL_DATA} \${WRKSRC}/compose.client.yml \${STAGEDIR}\${PREFIX}/share/sshfling/templates/compose.client.yml
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/install-local.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/scripts/install-local.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/create-network.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/scripts/create-network.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/generate-ssh-key.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/scripts/generate-ssh-key.sh
+	\${INSTALL_DATA} \${WRKSRC}/secrets/.gitkeep \${STAGEDIR}\${PREFIX}/share/sshfling/templates/secrets/.gitkeep
+	\${INSTALL_DATA} \${WRKSRC}/ssh-client/Dockerfile \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-client/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-client/entrypoint.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-client/entrypoint.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/Dockerfile \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-server/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/entrypoint.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-server/entrypoint.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/limited-session.sh \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-server/limited-session.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/sshd_config \${STAGEDIR}\${PREFIX}/share/sshfling/templates/ssh-server/sshd_config
+	\${INSTALL_SCRIPT} \${WRKSRC}/production/sshfling-session \${STAGEDIR}\${PREFIX}/share/sshfling/templates/production/sshfling-session
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.service \${STAGEDIR}\${PREFIX}/share/sshfling/templates/systemd/sshflingd.service
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.env.example \${STAGEDIR}\${PREFIX}/share/sshfling/templates/systemd/sshflingd.env.example
 
 .include <bsd.port.mk>
 MAKEFILE
@@ -229,6 +253,24 @@ cat >"$public_dir/freebsd/security/sshfling/pkg-plist" <<PLIST
 bin/sshfling
 libexec/sshfling-session
 @sample etc/sshfling/policy.json.sample
+share/sshfling/templates/.env.example
+share/sshfling/templates/LICENSE
+share/sshfling/templates/README.md
+share/sshfling/templates/compose.client.yml
+share/sshfling/templates/compose.server.yml
+share/sshfling/templates/production/sshfling-session
+share/sshfling/templates/scripts/create-network.sh
+share/sshfling/templates/scripts/generate-ssh-key.sh
+share/sshfling/templates/scripts/install-local.sh
+share/sshfling/templates/secrets/.gitkeep
+share/sshfling/templates/ssh-client/Dockerfile
+share/sshfling/templates/ssh-client/entrypoint.sh
+share/sshfling/templates/ssh-server/Dockerfile
+share/sshfling/templates/ssh-server/entrypoint.sh
+share/sshfling/templates/ssh-server/limited-session.sh
+share/sshfling/templates/ssh-server/sshd_config
+share/sshfling/templates/systemd/sshflingd.env.example
+share/sshfling/templates/systemd/sshflingd.service
 %%DOCSDIR%%/LICENSE
 %%DOCSDIR%%/README.md
 PLIST
@@ -257,6 +299,30 @@ do-install:
 	\${INSTALL_DATA} \${WRKSRC}/README.md \${WRKSRC}/LICENSE \${PREFIX}/share/doc/sshfling/
 	\${INSTALL_DATA_DIR} \${SYSCONFDIR}/sshfling
 	\${INSTALL_DATA} \${WRKSRC}/packaging/policy.json \${SYSCONFDIR}/sshfling/policy.json
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/scripts
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/secrets
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/ssh-client
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/ssh-server
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/production
+	\${INSTALL_DATA_DIR} \${PREFIX}/share/sshfling/templates/systemd
+	\${INSTALL_DATA} \${WRKSRC}/.env.example \${PREFIX}/share/sshfling/templates/.env.example
+	\${INSTALL_DATA} \${WRKSRC}/LICENSE \${PREFIX}/share/sshfling/templates/LICENSE
+	\${INSTALL_DATA} \${WRKSRC}/README.md \${PREFIX}/share/sshfling/templates/README.md
+	\${INSTALL_DATA} \${WRKSRC}/compose.server.yml \${PREFIX}/share/sshfling/templates/compose.server.yml
+	\${INSTALL_DATA} \${WRKSRC}/compose.client.yml \${PREFIX}/share/sshfling/templates/compose.client.yml
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/install-local.sh \${PREFIX}/share/sshfling/templates/scripts/install-local.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/create-network.sh \${PREFIX}/share/sshfling/templates/scripts/create-network.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/generate-ssh-key.sh \${PREFIX}/share/sshfling/templates/scripts/generate-ssh-key.sh
+	\${INSTALL_DATA} \${WRKSRC}/secrets/.gitkeep \${PREFIX}/share/sshfling/templates/secrets/.gitkeep
+	\${INSTALL_DATA} \${WRKSRC}/ssh-client/Dockerfile \${PREFIX}/share/sshfling/templates/ssh-client/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-client/entrypoint.sh \${PREFIX}/share/sshfling/templates/ssh-client/entrypoint.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/Dockerfile \${PREFIX}/share/sshfling/templates/ssh-server/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/entrypoint.sh \${PREFIX}/share/sshfling/templates/ssh-server/entrypoint.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/limited-session.sh \${PREFIX}/share/sshfling/templates/ssh-server/limited-session.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/sshd_config \${PREFIX}/share/sshfling/templates/ssh-server/sshd_config
+	\${INSTALL_SCRIPT} \${WRKSRC}/production/sshfling-session \${PREFIX}/share/sshfling/templates/production/sshfling-session
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.service \${PREFIX}/share/sshfling/templates/systemd/sshflingd.service
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.env.example \${PREFIX}/share/sshfling/templates/systemd/sshflingd.env.example
 
 .include <bsd.port.mk>
 MAKEFILE
@@ -276,6 +342,24 @@ cat >"$public_dir/openbsd/security/sshfling/pkg/PLIST" <<PLIST
 @bin bin/sshfling
 libexec/sshfling-session
 @sample \${SYSCONFDIR}/sshfling/policy.json
+share/sshfling/templates/.env.example
+share/sshfling/templates/LICENSE
+share/sshfling/templates/README.md
+share/sshfling/templates/compose.client.yml
+share/sshfling/templates/compose.server.yml
+share/sshfling/templates/production/sshfling-session
+share/sshfling/templates/scripts/create-network.sh
+share/sshfling/templates/scripts/generate-ssh-key.sh
+share/sshfling/templates/scripts/install-local.sh
+share/sshfling/templates/secrets/.gitkeep
+share/sshfling/templates/ssh-client/Dockerfile
+share/sshfling/templates/ssh-client/entrypoint.sh
+share/sshfling/templates/ssh-server/Dockerfile
+share/sshfling/templates/ssh-server/entrypoint.sh
+share/sshfling/templates/ssh-server/limited-session.sh
+share/sshfling/templates/ssh-server/sshd_config
+share/sshfling/templates/systemd/sshflingd.env.example
+share/sshfling/templates/systemd/sshflingd.service
 share/doc/sshfling/LICENSE
 share/doc/sshfling/README.md
 PLIST
@@ -295,7 +379,7 @@ LICENSE=	apache-2.0
 USE_LANGUAGES=	# none
 NO_BUILD=	yes
 REPLACE_PYTHON=	bin/sshfling
-INSTALLATION_DIRS=	bin libexec share/doc/sshfling etc/sshfling
+INSTALLATION_DIRS=	bin libexec share/doc/sshfling etc/sshfling share/sshfling/templates share/sshfling/templates/scripts share/sshfling/templates/secrets share/sshfling/templates/ssh-client share/sshfling/templates/ssh-server share/sshfling/templates/production share/sshfling/templates/systemd
 
 do-install:
 	\${INSTALL_SCRIPT} \${WRKSRC}/bin/sshfling \${DESTDIR}\${PREFIX}/bin/sshfling
@@ -303,6 +387,24 @@ do-install:
 	\${INSTALL_DATA} \${WRKSRC}/README.md \${DESTDIR}\${PREFIX}/share/doc/sshfling/README.md
 	\${INSTALL_DATA} \${WRKSRC}/LICENSE \${DESTDIR}\${PREFIX}/share/doc/sshfling/LICENSE
 	\${INSTALL_DATA} \${WRKSRC}/packaging/policy.json \${DESTDIR}\${PREFIX}/etc/sshfling/policy.json
+	\${INSTALL_DATA} \${WRKSRC}/.env.example \${DESTDIR}\${PREFIX}/share/sshfling/templates/.env.example
+	\${INSTALL_DATA} \${WRKSRC}/LICENSE \${DESTDIR}\${PREFIX}/share/sshfling/templates/LICENSE
+	\${INSTALL_DATA} \${WRKSRC}/README.md \${DESTDIR}\${PREFIX}/share/sshfling/templates/README.md
+	\${INSTALL_DATA} \${WRKSRC}/compose.server.yml \${DESTDIR}\${PREFIX}/share/sshfling/templates/compose.server.yml
+	\${INSTALL_DATA} \${WRKSRC}/compose.client.yml \${DESTDIR}\${PREFIX}/share/sshfling/templates/compose.client.yml
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/install-local.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/scripts/install-local.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/create-network.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/scripts/create-network.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/scripts/generate-ssh-key.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/scripts/generate-ssh-key.sh
+	\${INSTALL_DATA} \${WRKSRC}/secrets/.gitkeep \${DESTDIR}\${PREFIX}/share/sshfling/templates/secrets/.gitkeep
+	\${INSTALL_DATA} \${WRKSRC}/ssh-client/Dockerfile \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-client/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-client/entrypoint.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-client/entrypoint.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/Dockerfile \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-server/Dockerfile
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/entrypoint.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-server/entrypoint.sh
+	\${INSTALL_SCRIPT} \${WRKSRC}/ssh-server/limited-session.sh \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-server/limited-session.sh
+	\${INSTALL_DATA} \${WRKSRC}/ssh-server/sshd_config \${DESTDIR}\${PREFIX}/share/sshfling/templates/ssh-server/sshd_config
+	\${INSTALL_SCRIPT} \${WRKSRC}/production/sshfling-session \${DESTDIR}\${PREFIX}/share/sshfling/templates/production/sshfling-session
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.service \${DESTDIR}\${PREFIX}/share/sshfling/templates/systemd/sshflingd.service
+	\${INSTALL_DATA} \${WRKSRC}/systemd/sshflingd.env.example \${DESTDIR}\${PREFIX}/share/sshfling/templates/systemd/sshflingd.env.example
 
 .include "../../lang/python/application.mk"
 .include "../../mk/bsd.pkg.mk"
@@ -318,6 +420,24 @@ cat >"$public_dir/pkgsrc/security/sshfling/PLIST" <<PLIST
 @comment \$NetBSD\$
 bin/sshfling
 libexec/sshfling-session
+share/sshfling/templates/.env.example
+share/sshfling/templates/LICENSE
+share/sshfling/templates/README.md
+share/sshfling/templates/compose.client.yml
+share/sshfling/templates/compose.server.yml
+share/sshfling/templates/production/sshfling-session
+share/sshfling/templates/scripts/create-network.sh
+share/sshfling/templates/scripts/generate-ssh-key.sh
+share/sshfling/templates/scripts/install-local.sh
+share/sshfling/templates/secrets/.gitkeep
+share/sshfling/templates/ssh-client/Dockerfile
+share/sshfling/templates/ssh-client/entrypoint.sh
+share/sshfling/templates/ssh-server/Dockerfile
+share/sshfling/templates/ssh-server/entrypoint.sh
+share/sshfling/templates/ssh-server/limited-session.sh
+share/sshfling/templates/ssh-server/sshd_config
+share/sshfling/templates/systemd/sshflingd.env.example
+share/sshfling/templates/systemd/sshflingd.service
 share/doc/sshfling/LICENSE
 share/doc/sshfling/README.md
 etc/sshfling/policy.json
@@ -411,10 +531,20 @@ cat >"$public_dir/guix/sshfling.scm" <<GUIX
     (arguments
      '(#:install-plan
        '(("bin/sshfling" "bin/sshfling")
-         ("production/sshfling-session" "share/sshfling/templates/production/sshfling-session")
          ("README.md" "share/doc/sshfling/README.md")
          ("LICENSE" "share/doc/sshfling/LICENSE")
-         ("packaging/policy.json" "etc/sshfling/policy.json"))))
+         ("packaging/policy.json" "etc/sshfling/policy.json")
+         (".env.example" "share/sshfling/templates/.env.example")
+         ("LICENSE" "share/sshfling/templates/LICENSE")
+         ("README.md" "share/sshfling/templates/README.md")
+         ("compose.server.yml" "share/sshfling/templates/compose.server.yml")
+         ("compose.client.yml" "share/sshfling/templates/compose.client.yml")
+         ("scripts" "share/sshfling/templates/scripts")
+         ("secrets" "share/sshfling/templates/secrets")
+         ("ssh-client" "share/sshfling/templates/ssh-client")
+         ("ssh-server" "share/sshfling/templates/ssh-server")
+         ("production" "share/sshfling/templates/production")
+         ("systemd" "share/sshfling/templates/systemd"))))
     (inputs (list python openssh shadow procps util-linux))
     (home-page "${base_url}")
     (synopsis "Temporary SSH certificate issuer and access CLI")
@@ -564,11 +694,13 @@ install -Dm755 production/sshfling-session %{buildroot}%{_datadir}/sshfling/temp
 install -Dm644 packaging/policy.json %{buildroot}%{_sysconfdir}/sshfling/policy.json
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 install -Dm644 README.md %{buildroot}%{_docdir}/%{name}/README.md
+mkdir -p %{buildroot}%{_datadir}/sshfling/templates
+cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd %{buildroot}%{_datadir}/sshfling/templates/
 
 %files
 %{_bindir}/sshfling
 %config(noreplace) %{_sysconfdir}/sshfling/policy.json
-%{_datadir}/sshfling/templates/production/sshfling-session
+%{_datadir}/sshfling/templates
 %license %{_licensedir}/%{name}/LICENSE
 %doc %{_docdir}/%{name}/README.md
 
@@ -593,6 +725,8 @@ confinement: classic
 apps:
   sshfling:
     command: bin/sshfling
+    environment:
+      SSHFLING_TEMPLATE_DIR: \$SNAP/share/sshfling/templates
 
 parts:
   sshfling:
@@ -600,6 +734,17 @@ parts:
     source: ${base_url}/downloads/${source_tar}
     organize:
       bin/sshfling: bin/sshfling
+      .env.example: share/sshfling/templates/.env.example
+      LICENSE: share/sshfling/templates/LICENSE
+      README.md: share/sshfling/templates/README.md
+      compose.server.yml: share/sshfling/templates/compose.server.yml
+      compose.client.yml: share/sshfling/templates/compose.client.yml
+      scripts: share/sshfling/templates/scripts
+      secrets: share/sshfling/templates/secrets
+      ssh-client: share/sshfling/templates/ssh-client
+      ssh-server: share/sshfling/templates/ssh-server
+      production: share/sshfling/templates/production
+      systemd: share/sshfling/templates/systemd
     stage-packages:
       - python3
       - openssh-client
@@ -625,12 +770,18 @@ termux_step_make_install() {
 	install -Dm644 LICENSE "\$TERMUX_PREFIX/share/doc/sshfling/LICENSE"
 	install -Dm644 README.md "\$TERMUX_PREFIX/share/doc/sshfling/README.md"
 	install -Dm644 packaging/policy.json "\$TERMUX_PREFIX/etc/sshfling/policy.json"
+	mkdir -p "\$TERMUX_PREFIX/share/sshfling/templates"
+	cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd "\$TERMUX_PREFIX/share/sshfling/templates/"
 }
 TERMUX
 
 cat >"$public_dir/appimage/AppImageBuilder.yml" <<APPIMAGE
 version: 1
 script:
+  - mkdir -p AppDir/usr/bin AppDir/usr/share/sshfling/templates
+  - cp bin/sshfling AppDir/usr/bin/sshfling
+  - cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd AppDir/usr/share/sshfling/templates/
+  - chmod 0755 AppDir/usr/bin/sshfling
   - install -Dm755 AppDir/usr/bin/sshfling AppDir/AppRun
 AppDir:
   path: ./AppDir

@@ -53,6 +53,8 @@ jobs:
             --exclude=.github \
             --exclude=build \
             --exclude=dist \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
             --transform "s,^\.,sshfling-${SSHFLING_VERSION}," \
             -czf "dist/sshfling-${SSHFLING_VERSION}.tar.gz" \
             .

@@ -1,5 +1,5 @@
 PREFIX ?= $(HOME)/.local
-VERSION ?= 0.1.9
+VERSION ?= 0.1.10
 TEMPLATE_DIR := $(PREFIX)/share/sshfling/templates
 
 .PHONY: install-local uninstall-local test package package-deb package-rpm package-msi package-pkg clean
@@ -23,7 +23,9 @@ uninstall-local:
 
 test:
 	python3 -m py_compile bin/sshfling
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	bash -n scripts/install-local.sh scripts/create-network.sh scripts/generate-ssh-key.sh ssh-client/entrypoint.sh ssh-server/entrypoint.sh ssh-server/limited-session.sh production/sshfling-session packaging/*.sh
+	sh tests/cross-os/validate-cli.sh ./bin/sshfling "$(VERSION)"
 	docker compose -f compose.server.yml config >/dev/null
 	docker compose -f compose.client.yml config >/dev/null
 
