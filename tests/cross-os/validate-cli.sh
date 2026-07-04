@@ -50,6 +50,7 @@ printf '%s\n' "$connect_output" | grep -Fq "whoami" || fail "connect dry-run mis
 python3 - "$cmd" <<'PY'
 import importlib.machinery
 import importlib.util
+from pathlib import Path
 import shutil
 import sys
 
@@ -57,10 +58,25 @@ cmd = sys.argv[1]
 if "/" not in cmd:
     cmd = shutil.which(cmd)
     assert cmd, "sshfling command not found on PATH"
-loader = importlib.machinery.SourceFileLoader("sshfling_under_test", cmd)
-spec = importlib.util.spec_from_loader(loader.name, loader)
-sshfling = importlib.util.module_from_spec(spec)
-loader.exec_module(sshfling)
+command_path = Path(cmd)
+candidates = []
+wrapped_path = command_path.with_name(f".{command_path.name}-wrapped")
+if wrapped_path.exists():
+    candidates.append(wrapped_path)
+candidates.append(command_path)
+
+last_syntax_error = None
+for candidate in candidates:
+    loader = importlib.machinery.SourceFileLoader("sshfling_under_test", str(candidate))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    sshfling = importlib.util.module_from_spec(spec)
+    try:
+        loader.exec_module(sshfling)
+        break
+    except SyntaxError as exc:
+        last_syntax_error = exc
+else:
+    raise last_syntax_error or AssertionError(f"could not load sshfling source from {candidates}")
 
 class Result:
     returncode = 0
