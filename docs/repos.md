@@ -5,7 +5,7 @@ The repo includes two GitHub Actions release paths:
 - `Release packages without web` builds `.deb`, `.rpm`, `.msi`, `.pkg`, a source tarball, and release checksums.
 - `Release packages with public web` builds the same package set and publishes a GitHub Pages package site with APT, RPM, Homebrew, macOS pkg, and Windows MSI install entry points.
 
-For public installs, enable GitHub Pages for Actions in the repository settings and run the `Release packages with public web` workflow from a version tag such as `v0.1.1`.
+For public installs, enable GitHub Pages for Actions in the repository settings and run the `Release packages with public web` workflow from a version tag such as `v0.1.2`.
 
 Replace `OWNER` and `REPO` in the examples below with the GitHub organization/user and repository name.
 
@@ -31,6 +31,7 @@ curl -fsSL "${BASE_URL}/install.sh" | bash -s -- brew
 ## Public Debian / Ubuntu APT
 
 ```bash
+sudo rm -f /etc/apt/sources.list.d/fling.list /etc/apt/preferences.d/fling
 echo "deb [trusted=yes] ${BASE_URL}/apt ./" | sudo tee /etc/apt/sources.list.d/sshfling.list
 sudo tee /etc/apt/preferences.d/sshfling >/dev/null <<EOF
 Package: sshfling
@@ -44,6 +45,7 @@ sudo apt install -y sshfling
 ## Public RHEL / Fedora / Rocky / Alma RPM
 
 ```bash
+sudo rm -f /etc/yum.repos.d/fling.repo
 sudo tee /etc/yum.repos.d/sshfling.repo >/dev/null <<EOF
 [sshfling]
 name=SSHFling
@@ -141,7 +143,7 @@ For production, sign RPMs and enable `gpgcheck=1`.
 For direct `.pkg` distribution:
 
 ```bash
-sudo installer -pkg dist/sshfling-0.1.1.pkg -target /
+sudo installer -pkg dist/sshfling-0.1.2.pkg -target /
 ```
 
 For Homebrew distribution, publish a source tarball and add a formula to a tap:
@@ -150,7 +152,7 @@ For Homebrew distribution, publish a source tarball and add a formula to a tap:
 class Sshfling < Formula
   desc "Time-limited SSH Docker Compose deployment CLI"
   homepage "https://example.com/sshfling"
-  url "https://example.com/sshfling-0.1.1.tar.gz"
+  url "https://example.com/sshfling-0.1.2.tar.gz"
   sha256 "REPLACE_WITH_SHA256"
   license "Apache-2.0"
 
@@ -189,7 +191,7 @@ MSI files are not installed from APT/YUM-style repos. Common registration paths:
 Silent install:
 
 ```powershell
-msiexec /i sshfling-0.1.1.msi /qn
+msiexec /i sshfling-0.1.2.msi /qn
 ```
 
 For production, sign the MSI with an Authenticode certificate.

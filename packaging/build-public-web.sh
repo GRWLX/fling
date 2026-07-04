@@ -83,6 +83,7 @@ base_host="${base_host%%/*}"
 mode="${1:-auto}"
 
 install_apt() {
+  sudo rm -f /etc/apt/sources.list.d/fling.list /etc/apt/preferences.d/fling
   echo "deb [trusted=yes] ${base_url}/apt ./" | sudo tee /etc/apt/sources.list.d/sshfling.list >/dev/null
   sudo tee /etc/apt/preferences.d/sshfling >/dev/null <<EOF
 Package: sshfling
@@ -94,6 +95,7 @@ EOF
 }
 
 install_rpm() {
+  sudo rm -f /etc/yum.repos.d/fling.repo
   sudo tee /etc/yum.repos.d/sshfling.repo >/dev/null <<EOF
 [sshfling]
 name=SSHFling
