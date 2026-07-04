@@ -325,9 +325,10 @@ jobs:
           usesh: true
           prepare: |
             set -eu
+            export ASSUME_ALWAYS_YES=yes
+            export IGNORE_OSVERSION=yes
             if freebsd-version | grep -q "^12[.]"; then
               archive="https://pkg.opnsense.org/FreeBSD:12:amd64/snapshots/latest"
-              export ASSUME_ALWAYS_YES=yes
               export PACKAGESITE="$archive"
               mkdir -p /usr/local/etc/pkg/repos
               printf "%s\n" "FreeBSD: { enabled: no }" >/usr/local/etc/pkg/repos/FreeBSD.conf
