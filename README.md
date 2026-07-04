@@ -1,31 +1,75 @@
 # SSHFling
 
-`sshfling` is a production temporary SSH access tool. Normal use is intentionally small:
+`sshfling` grants temporary SSH access with standard OpenSSH. The server does not need an AI CLI, agent, SDK, or vendor daemon.
+
+## Server / Service Side
+
+Install the package, then run grants with `sudo`.
 
 ```bash
-sudo sshfling
-sudo sshfling -t 5m
-sudo sshfling -t 5m --username temp-name
+curl -fsSL https://grwlx.github.io/sshfling/install.sh | bash
+```
+
+Default certificate-based grant:
+
+```bash
+sudo sshfling -t 10m --username ticket-1234 --remote 1.0.0.1
+```
+
+Password fallback for clients that cannot use a generated key/certificate:
+
+```bash
+sudo sshfling -p -t 10m --username s234 --remote 1.0.0.1 --reload
+```
+
+Clean expired password grants:
+
+```bash
+sudo sshfling password prune --reload
+```
+
+See active sessions or cut them off:
+
+```bash
 sudo sshfling list
-sudo sshfling -k s432
-sudo sshfling web
+sudo sshfling -k s234
 sudo sshfling shutdown
-sudo sshfling -k
+```
+
+## Client Side
+
+Use the command printed by the server-side grant.
+
+```bash
+curl -fsSL https://grwlx.github.io/sshfling/install.sh | bash
+```
+
+Certificate grant:
+
+```bash
+ssh -i /path/to/generated/key user@1.0.0.1
+```
+
+Password grant:
+
+```bash
 sshfling s234@1.0.0.1
 ```
 
-If `--username` is omitted, `sshfling` creates a random temporary username like `s123`.
+Then type the generated password when OpenSSH prompts for it. Client mode does not require root.
+
+On the server side, `-p` is short for `--password`. On the client side, `sshfling -p 2222 user@host` is passed through to OpenSSH as the SSH port option.
 
 Rules:
 
-- `sshfling`, `sshfling -t`, `sshfling --password`, `sshfling shutdown`, and `sshfling -k` require root/admin.
-- `sshfling s234@1.0.0.1` is client connect mode and does not require root.
-- The maximum time is 1 hour.
+- Server-side grant, prune, shutdown, and kill commands require root/admin.
+- The maximum grant time is 1 hour.
 - `sshfling` with no `-t` uses the maximum: 1 hour.
 - Up to 10 active sshfling SSH sessions are allowed, depending on install policy.
-- If no SSH public key is provided, `sshfling` creates a temporary keypair automatically.
+- If no SSH public key is provided, certificate mode creates a temporary keypair automatically.
+- Password mode creates a real Unix account password and tracks it for later pruning.
 
-Under the hood, it uses OpenSSH user certificates and a host-side timeout wrapper.
+Under the hood, certificate mode uses OpenSSH user certificates and a host-side timeout wrapper. Password mode writes a temporary sshd `Match User` block that forces the same timeout wrapper.
 
 SSHFling also fits AI-assisted operations where the target server should not run an AI CLI, agent, SDK, or vendor daemon. An operator can grant a short-lived standard SSH session to a human or AI tool from a workstation, while the server continues to rely on OpenSSH certificates, local policy, and a forced command wrapper for timeout enforcement. See [AI-assisted temporary server access](docs/ai-temporary-access.md).
 
@@ -74,6 +118,12 @@ sshfling s234@1.0.0.1
 ```
 
 On the client side, run the command, press Enter, then type the printed password when OpenSSH prompts for it. `sshfling s234@1.0.0.1` is a small wrapper around `ssh` that prefers password authentication and lets OpenSSH handle the password prompt.
+
+Password mode is intended for Linux SSH servers with `useradd`, `chpasswd`, and OpenSSH server tools installed. It creates a real local Unix password for the temporary user, writes a tracked sshd config snippet, and blocks expired logins through `ForceCommand`. After grants expire, remove stale snippets and lock sshfling-created users:
+
+```bash
+sudo sshfling password prune --reload
+```
 
 Kill active sshfling SSH sessions:
 

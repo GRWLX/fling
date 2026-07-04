@@ -202,7 +202,7 @@ log "ssh login succeeds before expiry"
 grep -q '^root$' "$work/whoami.out"
 
 log "password grant prints sshfling connect command and accepts password login"
-bin/sshfling --json --password -t 8s \
+bin/sshfling --json -p -t 8s \
   --username s234 \
   --remote 127.0.0.1 >"$work/password-setup.json"
 python3 - "$work/password-setup.json" "$work/password.env" <<'PY'
@@ -222,6 +222,8 @@ PY
 source "$work/password.env"
 grep -q "Match User s234" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
 grep -q "ForceCommand /usr/local/libexec/sshfling-session --max-seconds 8 --username s234 --login-user s234 --policy-file /etc/sshfling/policy.json --expires-at" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
+test -f /var/lib/sshfling/password-grants/s234.json
+grep -q '"created_user": true' /var/lib/sshfling/password-grants/s234.json
 
 sshd -t
 kill "$sshd_pid"
@@ -252,6 +254,25 @@ if [[ "$password_expired_code" -eq 0 ]]; then
   fail "expected expired password grant to reject ssh login"
 fi
 grep -q "Temporary SSH access expired" "$work/password-expired.err"
+
+log "prune expired password grant removes config and locks the temporary user"
+bin/sshfling --json password prune --username s234 >"$work/password-prune.json"
+python3 - "$work/password-prune.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["count"] == 1
+result = payload["results"][0]
+assert result["status"] == "pruned"
+assert result["config"]["removed"] is True
+assert result["metadata"]["removed"] is True
+assert result["user"]["locked"] is True
+PY
+test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
+test ! -e /var/lib/sshfling/password-grants/s234.json
+grep -Eq '^s234:!' /etc/shadow
+sshd -t
 
 log "list and kill named sessions with max connections policy"
 for name in s101 s102 s103; do

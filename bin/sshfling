@@ -21,12 +21,13 @@ import tempfile
 import time
 from pathlib import Path
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 DEFAULT_NETWORK = "timed-ssh-net"
 DEFAULT_SESSION_WRAPPER = "/usr/local/libexec/sshfling-session"
 DEFAULT_ISSUER_LISTEN = "127.0.0.1:8787"
 DEFAULT_SESSION_DIR = "/var/lib/sshfling/sessions"
 DEFAULT_POLICY_FILE = "/etc/sshfling/policy.json"
+DEFAULT_PASSWORD_GRANT_DIR = "/var/lib/sshfling/password-grants"
 DEFAULT_TEMP_USERNAME_PREFIX = "s"
 MAX_TIME_SECONDS = 3600
 MAX_CONNECTIONS = 10
@@ -172,10 +173,10 @@ def find_template_dir():
     candidates.extend(
         [
             Path(__file__).resolve().parent / "templates",
+            source_root(),
             Path(__file__).resolve().parents[1] / "share/sshfling/templates",
             Path("/usr/share/sshfling/templates"),
             Path.home() / ".local/share/sshfling/templates",
-            source_root(),
         ]
     )
 
@@ -775,6 +776,13 @@ def random_username(prefix=DEFAULT_TEMP_USERNAME_PREFIX):
     return f"{prefix}{secrets.randbelow(1000):03d}"
 
 
+def default_login_shell():
+    for candidate in ["/bin/bash", "/bin/sh"]:
+        if Path(candidate).exists():
+            return candidate
+    return "/bin/sh"
+
+
 def is_ssh_connect_target(value):
     if value.startswith("-") or "/" in value or value.count("@") != 1:
         return False
@@ -803,6 +811,7 @@ def maybe_connect_argv(argv):
         "test-timeout",
         "compose",
         "package",
+        "password",
     }
     for index, token in enumerate(argv):
         if token == "--":
@@ -844,25 +853,43 @@ def validate_unix_username(username):
         )
 
 
+def require_password_host_tools():
+    missing = [name for name in ["useradd", "chpasswd"] if not command_path(name)]
+    if missing:
+        raise SSHFlingError(
+            "Password grant setup requires Linux account tools. Install shadow/passwd tooling, or use certificate mode.",
+            127,
+            missing=missing,
+        )
+
+
 def set_user_password(username, password):
     run_with_input(["chpasswd"], f"{username}:{password}\n", capture=True)
+    if command_path("usermod"):
+        run(["usermod", "--unlock", username], capture=True, check=False)
+    if command_path("chage"):
+        run(["chage", "-E", "-1", username], capture=True, check=False)
 
 
 def ensure_unix_user(username):
     if run(["id", "-u", username], capture=True, check=False).returncode == 0:
         return {"user": username, "created": False}
-    run(["useradd", "--create-home", "--shell", "/bin/bash", username])
+    run(["useradd", "--create-home", "--shell", default_login_shell(), username])
     return {"user": username, "created": True}
 
 
-def password_grant_config(username, seconds, expires_at, session_wrapper, policy_file):
+def password_force_command(username, seconds, expires_at, session_wrapper, policy_file):
+    return f"{session_wrapper} --max-seconds {seconds} --username {username} --login-user {username} --policy-file {policy_file} --expires-at {expires_at}"
+
+
+def password_grant_config(username, force_command):
     return f"""# Managed by sshfling password grant for {username}.
 Match User {username}
     PasswordAuthentication yes
     KbdInteractiveAuthentication no
     PubkeyAuthentication no
     AuthenticationMethods password
-    ForceCommand {session_wrapper} --max-seconds {seconds} --username {username} --login-user {username} --policy-file {policy_file} --expires-at {expires_at}
+    ForceCommand {force_command}
     AllowTcpForwarding no
     X11Forwarding no
     PermitTunnel no
@@ -871,6 +898,7 @@ Match User {username}
 
 def cmd_setup_password(args):
     require_root("temporary password SSH access")
+    require_password_host_tools()
     if not args.username:
         args.username = random_username()
     validate_unix_username(args.username)
@@ -883,6 +911,8 @@ def cmd_setup_password(args):
     if seconds > active_policy["max_time_seconds"]:
         raise SSHFlingError(f"Password lifetime cannot exceed {format_duration(active_policy['max_time_seconds'])}.", 2)
 
+    previous_metadata = read_password_grant_metadata(args.password_grant_dir, args.username)
+    pre_prune = prune_password_grants(args.password_grant_dir, username=args.username, dry_run=args.dry_run)
     expires_at = int(time.time()) + seconds
     password = secrets.token_urlsafe(18)
     if args.dry_run:
@@ -894,28 +924,48 @@ def cmd_setup_password(args):
     wrapper_path = Path(args.session_wrapper).expanduser()
     config_dir = Path(args.password_sshd_config_dir).expanduser()
     config_path = config_dir / f"91-sshfling-password-{args.username}.conf"
-    config = password_grant_config(args.username, seconds, expires_at, str(wrapper_path), args.policy_file)
+    force_command = password_force_command(args.username, seconds, expires_at, str(wrapper_path), args.policy_file)
+    config = password_grant_config(args.username, force_command)
+    created_user = bool(user_result.get("created")) or bool((previous_metadata or {}).get("created_user"))
+    metadata = {
+        "version": 1,
+        "auth": "password",
+        "managed_by": "sshfling",
+        "username": args.username,
+        "created_user": created_user,
+        "created_at": int(time.time()),
+        "seconds": seconds,
+        "expires_at": expires_at,
+        "config_path": str(config_path),
+        "session_wrapper": str(wrapper_path),
+        "policy_file": args.policy_file,
+    }
 
     results = [
+        {"pre_prune": pre_prune},
         install_file(resource_file("production/sshfling-session"), wrapper_path, 0o755, args.dry_run),
         write_if_changed(config_path, config, 0o644, args.dry_run),
+        write_password_grant_metadata(args.password_grant_dir, args.username, metadata, args.dry_run),
         user_result,
     ]
 
     if not args.dry_run and args.validate:
-        run(["sshd", "-t"], capture=True)
-        results.append({"validated": "sshd -t"})
+        results.append(
+            validate_sshd_effective(
+                args.username,
+                [
+                    "passwordauthentication yes",
+                    "kbdinteractiveauthentication no",
+                    "pubkeyauthentication no",
+                    "authenticationmethods password",
+                    f"forcecommand {force_command}",
+                ],
+                config_path,
+            )
+        )
 
     if not args.dry_run and args.reload:
-        if command_path("systemctl"):
-            proc = run(["systemctl", "reload", "sshd"], capture=True, check=False)
-            if proc.returncode != 0:
-                proc = run(["systemctl", "reload", "ssh"], capture=True, check=False)
-            if proc.returncode != 0:
-                raise SSHFlingError("Could not reload sshd with systemctl.", proc.returncode, stderr=proc.stderr)
-            results.append({"reloaded": "sshd"})
-        else:
-            raise SSHFlingError("systemctl is not available; reload sshd manually.", 127)
+        results.append(reload_sshd())
 
     remote = args.remote or "REMOTE_HOST"
     payload = {
@@ -1190,6 +1240,205 @@ def install_file(src, dst, mode=0o755, dry_run=False):
     return {"path": str(dst), "source": str(src)}
 
 
+def reload_sshd():
+    override = os.environ.get("SSHFLING_SSHD_RELOAD_CMD")
+    attempts = []
+    commands = []
+
+    if override:
+        commands.append(shlex.split(override))
+    if command_path("systemctl"):
+        commands.extend([["systemctl", "reload", "sshd"], ["systemctl", "reload", "ssh"]])
+    if command_path("service"):
+        commands.extend([["service", "sshd", "reload"], ["service", "ssh", "reload"]])
+    if command_path("rc-service"):
+        commands.extend([["rc-service", "sshd", "reload"], ["rc-service", "ssh", "reload"]])
+    if command_path("rcctl"):
+        commands.append(["rcctl", "reload", "sshd"])
+    if command_path("pkill"):
+        commands.append(["pkill", "-HUP", "sshd"])
+
+    for command in commands:
+        proc = run(command, capture=True, check=False)
+        attempts.append({"command": shlex.join(command), "returncode": proc.returncode})
+        if proc.returncode == 0:
+            return {"reloaded": "sshd", "command": shlex.join(command), "attempts": attempts}
+
+    raise SSHFlingError("Could not reload sshd automatically; reload sshd manually.", 127, attempts=attempts)
+
+
+def validate_sshd_effective(username=None, expected_lines=None, config_hint=None):
+    run(["sshd", "-t"], capture=True)
+    result = {"validated": "sshd -t"}
+    if not expected_lines:
+        return result
+
+    proc = run(["sshd", "-T", "-C", f"user={username},host=localhost,addr=127.0.0.1"], capture=True)
+    effective = "\n".join(line.strip().lower() for line in proc.stdout.splitlines())
+    missing = [line for line in expected_lines if line.strip().lower() not in effective]
+    if missing:
+        raise SSHFlingError(
+            "sshd syntax is valid, but the sshfling Match configuration is not active. Ensure sshd_config includes the managed config path.",
+            2,
+            missing=missing,
+            config=str(config_hint) if config_hint else None,
+        )
+    result["validated_effective"] = "sshd -T"
+    return result
+
+
+def password_grant_metadata_path(grant_dir, username):
+    validate_unix_username(username)
+    return Path(grant_dir).expanduser() / f"{username}.json"
+
+
+def read_password_grant_metadata(grant_dir, username):
+    path = password_grant_metadata_path(grant_dir, username)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def write_password_grant_metadata(grant_dir, username, metadata, dry_run=False):
+    path = password_grant_metadata_path(grant_dir, username)
+    if dry_run:
+        return {"path": str(path), "dry_run": True}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    tmp_path = path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    tmp_path.chmod(0o600)
+    tmp_path.replace(path)
+    return {"path": str(path), "metadata": "written"}
+
+
+def remove_password_grant_config(path, username, dry_run=False):
+    path = Path(path)
+    if not path.exists():
+        return {"path": str(path), "status": "missing"}
+    content = path.read_text()
+    marker = f"# Managed by sshfling password grant for {username}."
+    if marker not in content:
+        raise SSHFlingError(f"Refusing to remove unmanaged sshd config: {path}", 2)
+    if dry_run:
+        return {"path": str(path), "would_remove": True, "dry_run": True}
+    path.unlink()
+    return {"path": str(path), "removed": True}
+
+
+def lock_password_user(username, dry_run=False):
+    if run(["id", "-u", username], capture=True, check=False).returncode != 0:
+        return {"user": username, "status": "missing"}
+    if dry_run:
+        return {"user": username, "would_lock": True, "dry_run": True}
+
+    attempts = []
+    locked = False
+    expired = False
+    if command_path("usermod"):
+        proc = run(["usermod", "--lock", username], capture=True, check=False)
+        attempts.append({"command": f"usermod --lock {username}", "returncode": proc.returncode})
+        locked = proc.returncode == 0
+    if command_path("passwd") and not locked:
+        proc = run(["passwd", "-l", username], capture=True, check=False)
+        attempts.append({"command": f"passwd -l {username}", "returncode": proc.returncode})
+        locked = proc.returncode == 0
+    if command_path("chage"):
+        proc = run(["chage", "-E", "0", username], capture=True, check=False)
+        attempts.append({"command": f"chage -E 0 {username}", "returncode": proc.returncode})
+        expired = proc.returncode == 0
+
+    if not locked:
+        raise SSHFlingError(f"Could not lock expired password user: {username}", 1, attempts=attempts)
+    return {"user": username, "locked": locked, "expired": expired, "attempts": attempts}
+
+
+def delete_password_user(username, dry_run=False):
+    if run(["id", "-u", username], capture=True, check=False).returncode != 0:
+        return {"user": username, "status": "missing"}
+    if dry_run:
+        return {"user": username, "would_delete": True, "dry_run": True}
+    if not command_path("userdel"):
+        raise SSHFlingError("userdel is required for --delete-users.", 127)
+
+    proc = run(["userdel", "--remove", username], capture=True, check=False)
+    if proc.returncode != 0:
+        proc = run(["userdel", username], capture=True, check=False)
+    if proc.returncode != 0:
+        raise SSHFlingError(f"Could not delete password user: {username}", proc.returncode, stderr=proc.stderr)
+    return {"user": username, "deleted": True}
+
+
+def prune_password_grants(grant_dir, username=None, all_grants=False, delete_users=False, dry_run=False):
+    now = int(time.time())
+    root = Path(grant_dir).expanduser()
+    if username:
+        validate_unix_username(username)
+        paths = [password_grant_metadata_path(root, username)]
+    elif root.exists():
+        paths = sorted(root.glob("*.json"))
+    else:
+        paths = []
+
+    results = []
+    for path in paths:
+        if not path.exists():
+            results.append({"metadata_path": str(path), "status": "missing"})
+            continue
+
+        metadata = json.loads(path.read_text())
+        grant_username = metadata.get("username") or path.stem
+        validate_unix_username(grant_username)
+        expires_at = int(metadata.get("expires_at", 0))
+        if not all_grants and expires_at > now:
+            results.append({"metadata_path": str(path), "username": grant_username, "status": "active", "expires_at": expires_at})
+            continue
+
+        item = {"metadata_path": str(path), "username": grant_username, "expires_at": expires_at, "status": "pruned"}
+        config_path = metadata.get("config_path")
+        if config_path:
+            item["config"] = remove_password_grant_config(config_path, grant_username, dry_run)
+
+        if metadata.get("created_user"):
+            if delete_users:
+                item["user"] = delete_password_user(grant_username, dry_run)
+            else:
+                item["user"] = lock_password_user(grant_username, dry_run)
+        else:
+            item["user"] = {"user": grant_username, "status": "left-existing-user"}
+
+        if dry_run:
+            item["metadata"] = {"path": str(path), "would_remove": True, "dry_run": True}
+        else:
+            path.unlink()
+            item["metadata"] = {"path": str(path), "removed": True}
+        results.append(item)
+    return results
+
+
+def cmd_password_prune(args):
+    require_root("password prune")
+    results = prune_password_grants(
+        args.password_grant_dir,
+        username=args.username,
+        all_grants=args.all,
+        delete_users=args.delete_users,
+        dry_run=args.dry_run,
+    )
+    if args.reload and not args.dry_run and any(item.get("config", {}).get("removed") for item in results):
+        results.append(reload_sshd())
+
+    payload = {"ok": True, "results": results, "count": len(results)}
+    if args.json:
+        emit_json(payload)
+    else:
+        if not results:
+            print("no password grants to prune")
+        for item in results:
+            print(json.dumps(item, sort_keys=True))
+    return 0
+
+
 def cmd_host_install(args):
     require_root("host install")
     ca_pub = Path(args.ca_pub).expanduser().resolve()
@@ -1236,7 +1485,7 @@ Match User {args.user}
 
     if args.create_user and not args.dry_run:
         if run(["id", "-u", args.user], capture=True, check=False).returncode != 0:
-            run(["useradd", "--create-home", "--shell", "/bin/bash", args.user])
+            run(["useradd", "--create-home", "--shell", default_login_shell(), args.user])
             if command_path("openssl"):
                 password = run(["openssl", "rand", "-base64", "32"], capture=True).stdout.strip()
                 password_hash = run(["openssl", "passwd", "-6", password], capture=True).stdout.strip()
@@ -1244,19 +1493,21 @@ Match User {args.user}
             results.append({"created_user": args.user})
 
     if not args.dry_run and args.validate:
-        run(["sshd", "-t"], capture=True)
-        results.append({"validated": "sshd -t"})
+        results.append(
+            validate_sshd_effective(
+                args.user,
+                [
+                    f"trustedusercakeys {trusted_ca}",
+                    f"authorizedprincipalsfile {principals_dir}/%u",
+                    "passwordauthentication no",
+                    "authenticationmethods publickey",
+                ],
+                sshd_config,
+            )
+        )
 
     if not args.dry_run and args.reload:
-        if command_path("systemctl"):
-            proc = run(["systemctl", "reload", "sshd"], capture=True, check=False)
-            if proc.returncode != 0:
-                proc = run(["systemctl", "reload", "ssh"], capture=True, check=False)
-            if proc.returncode != 0:
-                raise SSHFlingError("Could not reload sshd with systemctl.", proc.returncode, stderr=proc.stderr)
-            results.append({"reloaded": "sshd"})
-        else:
-            raise SSHFlingError("systemctl is not available; reload sshd manually.", 127)
+        results.append(reload_sshd())
 
     payload = {"ok": True, "results": results}
     if args.json:
@@ -1933,7 +2184,7 @@ def build_parser():
     parser.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123.")
     parser.add_argument("--login-user", help="Actual Unix login account if different from --username.")
     parser.add_argument("--remote", help="Remote host to print in the suggested ssh command.")
-    parser.add_argument("--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
+    parser.add_argument("-p", "--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
     parser.add_argument("-k", "--kill", nargs="?", const=True, metavar="USERNAME", help="Kill active sshfling SSH session(s), optionally by name like s432.")
     parser.add_argument(
         "--project-dir",
@@ -1950,6 +2201,7 @@ def build_parser():
     parser.add_argument("--session-wrapper", default=DEFAULT_SESSION_WRAPPER, help=argparse.SUPPRESS)
     parser.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help=argparse.SUPPRESS)
     parser.add_argument("--password-sshd-config-dir", default="/etc/ssh/sshd_config.d", help=argparse.SUPPRESS)
+    parser.add_argument("--password-grant-dir", default=DEFAULT_PASSWORD_GRANT_DIR, help=argparse.SUPPRESS)
     parser.add_argument("--no-validate", dest="validate", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--reload", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
@@ -1966,7 +2218,7 @@ def build_parser():
     setup.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123.")
     setup.add_argument("--login-user", help="Actual Unix login account if different from --username.")
     setup.add_argument("--remote", help="Remote host to print in the suggested ssh command.")
-    setup.add_argument("--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
+    setup.add_argument("-p", "--password", action="store_true", help="Create temporary password SSH access instead of certificate access.")
     setup.add_argument("--ca-key", default=str(default_ca_key_path()), help="CA private key path.")
     setup.add_argument("--public-key", help="Public key text to sign.")
     setup.add_argument("--public-key-file", help="Public key file to sign. If omitted, sshfling generates a temporary keypair.")
@@ -1977,11 +2229,23 @@ def build_parser():
     setup.add_argument("--session-wrapper", default=DEFAULT_SESSION_WRAPPER, help="Forced command wrapper path on target hosts.")
     setup.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help=argparse.SUPPRESS)
     setup.add_argument("--password-sshd-config-dir", default="/etc/ssh/sshd_config.d", help=argparse.SUPPRESS)
+    setup.add_argument("--password-grant-dir", default=DEFAULT_PASSWORD_GRANT_DIR, help=argparse.SUPPRESS)
     setup.add_argument("--no-validate", dest="validate", action="store_false", help="Skip sshd -t validation in password mode.")
     setup.add_argument("--reload", action="store_true", help="Reload sshd after writing password-mode config.")
     setup.add_argument("--dry-run", action="store_true", help="Show intended password-mode changes without writing files.")
     setup.add_argument("--no-pty", action="store_true", help="Do not permit interactive PTY sessions.")
     setup.set_defaults(func=cmd_setup, validate=True)
+
+    password = subparsers.add_parser("password", help="Manage temporary password grants.")
+    password_sub = password.add_subparsers(dest="password_command", required=True)
+    password_prune = password_sub.add_parser("prune", help="Remove expired temporary password grants.")
+    password_prune.add_argument("--username", help="Only prune this temporary password username.")
+    password_prune.add_argument("--password-grant-dir", default=DEFAULT_PASSWORD_GRANT_DIR, help=argparse.SUPPRESS)
+    password_prune.add_argument("--all", action="store_true", help="Prune active and expired tracked password grants.")
+    password_prune.add_argument("--delete-users", action="store_true", help="Delete sshfling-created Unix users instead of locking them.")
+    password_prune.add_argument("--reload", action="store_true", help="Reload sshd after removing grant config.")
+    password_prune.add_argument("--dry-run", action="store_true", help="Show grants that would be pruned without changing files.")
+    password_prune.set_defaults(func=cmd_password_prune)
 
     shutdown = subparsers.add_parser("shutdown", help="Kill active sshfling SSH session(s).")
     shutdown.add_argument("session_username", nargs="?", help="SSHFling session name to kill, for example s432.")

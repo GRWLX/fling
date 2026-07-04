@@ -8,9 +8,11 @@ RUN apt-get update \
     openssh-client \
     openssh-server \
     openssl \
+    passwd \
     procps \
     python3 \
     sshpass \
+    util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/sshfling

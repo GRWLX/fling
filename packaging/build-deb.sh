@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${SSHFLING_VERSION:-0.1.4}"
+version="${SSHFLING_VERSION:-0.1.5}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="$repo_root/dist"
 stage="$repo_root/build/deb/sshfling_${version}_all"
@@ -27,7 +27,7 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3, openssh-client, procps, util-linux
+Depends: python3, openssh-client, passwd, procps, util-linux
 Suggests: openssh-server, docker.io | docker-ce | podman-docker
 Maintainer: SSHFling Maintainers <root@localhost>
 Description: Temporary SSH certificate issuer and access CLI

@@ -111,7 +111,7 @@ pkgdesc="Temporary SSH certificate issuer and access CLI"
 arch=('any')
 url="${base_url}"
 license=('Apache-2.0')
-depends=('python' 'openssh' 'procps-ng' 'util-linux')
+depends=('python' 'openssh' 'shadow' 'procps-ng' 'util-linux')
 optdepends=('docker: Docker Compose test harness')
 backup=('etc/sshfling/policy.json')
 source=("\${pkgname}-\${pkgver}.tar.gz::${base_url}/downloads/${source_tar}")
@@ -141,6 +141,7 @@ pkgbase = sshfling
 	license = Apache-2.0
 	depends = python
 	depends = openssh
+	depends = shadow
 	depends = procps-ng
 	depends = util-linux
 	optdepends = docker: Docker Compose test harness
@@ -161,7 +162,7 @@ pkgdesc="Temporary SSH certificate issuer and access CLI"
 url="${base_url}"
 arch="noarch"
 license="Apache-2.0"
-depends="python3 openssh-client procps util-linux"
+depends="python3 openssh-client shadow procps util-linux"
 options="!check"
 source="\$pkgname-\$pkgver.tar.gz::${base_url}/downloads/${source_tar}"
 builddir="\$srcdir/\$pkgname-\$pkgver"
@@ -342,7 +343,9 @@ cat >"$public_dir/nix/flake.nix" <<NIX
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in {
       packages = forAllSystems (system:
-        let pkgs = import nixpkgs { inherit system; };
+        let
+          pkgs = import nixpkgs { inherit system; };
+          runtimePath = [ pkgs.openssh pkgs.procps pkgs.util-linux ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.shadow ];
         in {
           default = pkgs.stdenvNoCC.mkDerivation {
             pname = "sshfling";
@@ -361,7 +364,7 @@ cat >"$public_dir/nix/flake.nix" <<NIX
               mkdir -p \$out/share/sshfling/templates
               cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd \$out/share/sshfling/templates/
               patchShebangs \$out/bin/sshfling
-              wrapProgram \$out/bin/sshfling --prefix PATH : \${pkgs.lib.makeBinPath [ pkgs.openssh pkgs.procps pkgs.util-linux ]}
+              wrapProgram \$out/bin/sshfling --prefix PATH : \${pkgs.lib.makeBinPath runtimePath}
               runHook postInstall
             '';
             meta = with pkgs.lib; {
@@ -389,6 +392,7 @@ cat >"$public_dir/guix/sshfling.scm" <<GUIX
   #:use-module (guix download)
   #:use-module (guix build-system copy)
   #:use-module ((guix licenses) #:prefix license:)
+  #:use-module (gnu packages admin)
   #:use-module (gnu packages linux)
   #:use-module (gnu packages python)
   #:use-module (gnu packages ssh))
@@ -410,7 +414,7 @@ cat >"$public_dir/guix/sshfling.scm" <<GUIX
          ("README.md" "share/doc/sshfling/README.md")
          ("LICENSE" "share/doc/sshfling/LICENSE")
          ("packaging/policy.json" "etc/sshfling/policy.json"))))
-    (inputs (list python openssh procps util-linux))
+    (inputs (list python openssh shadow procps util-linux))
     (home-page "${base_url}")
     (synopsis "Temporary SSH certificate issuer and access CLI")
     (description
@@ -423,7 +427,7 @@ cat >"$public_dir/void/template" <<VOID
 pkgname=sshfling
 version=${version}
 revision=1
-depends="python3 openssh procps-ng util-linux"
+depends="python3 openssh shadow procps-ng util-linux"
 short_desc="Temporary SSH certificate issuer and access CLI"
 maintainer="${maintainer}"
 license="Apache-2.0"
@@ -457,6 +461,7 @@ KEYWORDS="~amd64 ~arm64"
 REQUIRED_USE="\${PYTHON_REQUIRED_USE}"
 RDEPEND="\${PYTHON_DEPS}
 	virtual/ssh
+	sys-apps/shadow
 	sys-process/procps
 	sys-apps/util-linux"
 
@@ -536,6 +541,7 @@ Source0:        ${base_url}/downloads/${source_tar}
 BuildArch:      noarch
 Requires:       python3
 Requires:       openssh
+Requires:       shadow
 Requires:       procps
 Requires:       util-linux
 
@@ -594,6 +600,7 @@ parts:
     stage-packages:
       - python3
       - openssh-client
+      - passwd
       - procps
       - util-linux
 SNAP
@@ -638,12 +645,17 @@ AppDir:
     include:
       - python3
       - openssh-client
+      - passwd
       - procps
       - util-linux
   files:
     include:
       - /usr/bin/python3*
       - /usr/bin/ssh*
+      - /usr/sbin/chpasswd
+      - /usr/sbin/useradd
+      - /usr/sbin/usermod
+      - /usr/sbin/chage
       - /usr/bin/ps
       - /usr/bin/flock
       - /usr/lib/python3*

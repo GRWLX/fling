@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${SSHFLING_VERSION:-0.1.4}"
+version="${SSHFLING_VERSION:-0.1.5}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="$repo_root/dist"
 topdir="$repo_root/build/rpm"
@@ -38,6 +38,7 @@ License: Apache-2.0
 BuildArch: noarch
 Requires: python3
 Requires: openssh-clients
+Requires: shadow-utils
 Requires: procps-ng
 Requires: util-linux
 Source0: sshfling-files-${version}.tar.gz

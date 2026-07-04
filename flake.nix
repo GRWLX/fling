@@ -11,10 +11,11 @@
       packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          runtimePath = [ pkgs.openssh pkgs.procps pkgs.util-linux ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.shadow ];
         in {
           default = pkgs.stdenvNoCC.mkDerivation {
             pname = "sshfling";
-            version = "0.1.4";
+            version = "0.1.5";
             src = self;
             nativeBuildInputs = [ pkgs.makeWrapper ];
             installPhase = ''
@@ -26,7 +27,7 @@
               mkdir -p $out/share/sshfling/templates
               cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd $out/share/sshfling/templates/
               patchShebangs $out/bin/sshfling
-              wrapProgram $out/bin/sshfling --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.openssh pkgs.procps pkgs.util-linux ]}
+              wrapProgram $out/bin/sshfling --prefix PATH : ${pkgs.lib.makeBinPath runtimePath}
               runHook postInstall
             '';
             meta = with pkgs.lib; {

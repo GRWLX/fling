@@ -2,7 +2,7 @@
 
 SSHFling is useful when an engineer wants help from an AI coding or operations tool, but the production server should not run an AI CLI, agent, SDK, or vendor-specific daemon.
 
-The target host only needs standard OpenSSH and the small `sshfling-session` wrapper. Access is granted with short-lived OpenSSH user certificates, so the AI tool can work through the same SSH channel an operator would use. When the timer expires, the certificate stops being useful and any active session is cut off by the server-side wrapper.
+The target host only needs standard OpenSSH and the small `sshfling-session` wrapper. The default flow grants access with short-lived OpenSSH user certificates, so the AI tool can work through the same SSH channel an operator would use. When the timer expires, the certificate stops being useful and any active session is cut off by the server-side wrapper.
 
 ## Why This Helps
 
@@ -19,18 +19,27 @@ SSHFling avoids that pattern. It lets an administrator issue access for a narrow
 5. The server-side forced command enforces the wall-clock limit even if the connection is already open.
 6. The operator can list or kill active sessions with `sudo sshfling list`, `sudo sshfling -k ticket-1234`, or `sudo sshfling shutdown`.
 
+For clients that cannot receive or use an SSH key/certificate, an operator can use password fallback:
+
+```bash
+sudo sshfling --password -t 10m --username s234 --remote 1.0.0.1 --reload
+```
+
+That creates a tracked temporary Unix password grant and prints `sshfling s234@1.0.0.1`. The client still uses normal OpenSSH; `sshfling` only sets password-preferred SSH options and lets OpenSSH prompt for the generated password.
+
 ## Security Properties
 
 - No AI CLI, agent, model runtime, or vendor daemon needs to be installed on the target server.
 - No permanent private key is copied to the server for the AI tool.
-- No shared password is required.
-- Access is time-bound by OpenSSH certificate validity and by a server-side timeout wrapper.
+- Certificate mode does not require a shared password.
+- Password fallback creates a real local Unix password, tracks the grant on the server, and should be pruned after expiry with `sudo sshfling password prune --reload`.
+- Access is time-bound by OpenSSH certificate validity or password-grant expiry, and by a server-side timeout wrapper.
 - Policy can cap maximum lifetime and concurrent sessions below SSHFling's hard limits.
 - Each grant can use a meaningful temporary username, such as a ticket number, for cleaner operational review.
 - Existing SSH logs, process accounting, shell history policy, endpoint monitoring, and package integrity controls remain usable.
 
 ## Operational Guidance
 
-Treat SSHFling as a controlled access broker, not as a replacement for change management. Use short durations, issue access per task, prefer named grants tied to tickets, and keep package and policy files managed by your normal configuration system.
+Treat SSHFling as a controlled access broker, not as a replacement for change management. Use short durations, issue access per task, prefer named grants tied to tickets, and keep package and policy files managed by your normal configuration system. Prefer certificate mode when possible; use password fallback only when the client environment cannot handle SSH keys or certificates.
 
 For higher-security environments, publish SSHFling through signed packages, protect `/etc/sshfling/policy.json`, monitor the issuer service, and alert on unexpected policy or package changes.
