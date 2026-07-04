@@ -325,9 +325,33 @@ jobs:
           usesh: true
           prepare: |
             set -eu
-            pkg update -f || true
-            if ! pkg install -y curl python3; then
-              pkg install -y curl python39
+            if freebsd-version | grep -q '^12\.'; then
+              archive="https://pkg.opnsense.org/FreeBSD:12:amd64/snapshots/latest"
+              export ASSUME_ALWAYS_YES=yes
+              export PACKAGESITE="$archive"
+              mkdir -p /usr/local/etc/pkg/repos
+              cat >/usr/local/etc/pkg/repos/FreeBSD.conf <<'EOF'
+            FreeBSD: { enabled: no }
+            EOF
+              cat >/usr/local/etc/pkg/repos/OPNsenseArchive.conf <<'EOF'
+            OPNsenseArchive: {
+              url: "pkg+https://pkg.opnsense.org/FreeBSD:12:amd64/snapshots/latest",
+              signature_type: "none",
+              enabled: yes
+            }
+            EOF
+              if ! pkg bootstrap -f; then
+                fetch -o /tmp/pkg.txz "$archive/Latest/pkg.txz"
+                tar -C / -xpf /tmp/pkg.txz
+              fi
+              pkg update -f
+              pkg install -y curl python38
+              ln -sf /usr/local/bin/python3.8 /usr/local/bin/python3
+            else
+              pkg update -f || true
+              if ! pkg install -y curl python3; then
+                pkg install -y curl python39
+              fi
             fi
             if ! command -v python3 >/dev/null 2>&1; then
               for py in /usr/local/bin/python3.12 /usr/local/bin/python3.11 /usr/local/bin/python3.10 /usr/local/bin/python3.9; do

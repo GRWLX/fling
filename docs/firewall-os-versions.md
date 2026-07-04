@@ -15,7 +15,7 @@ because there is no public `16.0-CURRENT` runner in the VMActions matrix.
 
 | FreeBSD runner | Firewall mapping | Validation claim |
 | --- | --- | --- |
-| 12.4 | pfSense Plus 21.x/22.x, pfSense CE 2.5.x/2.6.x, OPNsense HardenedBSD/FreeBSD 12.x-era releases | Nearest 12.x smoke, not exact |
+| 12.4 | pfSense Plus 21.x/22.x, pfSense CE 2.5.x/2.6.x, OPNsense HardenedBSD/FreeBSD 12.x-era releases | Nearest 12.x smoke, not exact; CI bootstraps Python from the OPNsense FreeBSD:12 package snapshot because the FreeBSD 12 package bootstrap endpoint is gone |
 | 13.2 | OPNsense 22.x nearest, OPNsense 23.x, OPNsense 24.1, Business 23.10, Business 24.4 | Exact or nearest 13.x smoke |
 | 13.3 | no direct firewall release mapping found | 13.x continuity smoke |
 | 13.4 | no direct firewall release mapping found | 13.x continuity smoke |
@@ -176,5 +176,8 @@ every BE series linked from that index.
   https://docs.opnsense.org/CE_releases.html
 - OPNsense Business Edition release index:
   https://docs.opnsense.org/BE_releases.html
+- OPNsense FreeBSD:12 package snapshot used for the historical 12.4 CI
+  bootstrap:
+  https://pkg.opnsense.org/FreeBSD:12:amd64/snapshots/latest/
 - VMActions public FreeBSD VM support matrix:
   https://github.com/vmactions/freebsd-vm
