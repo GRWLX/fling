@@ -50,9 +50,13 @@ printf '%s\n' "$connect_output" | grep -Fq "whoami" || fail "connect dry-run mis
 python3 - "$cmd" <<'PY'
 import importlib.machinery
 import importlib.util
+import shutil
 import sys
 
 cmd = sys.argv[1]
+if "/" not in cmd:
+    cmd = shutil.which(cmd)
+    assert cmd, "sshfling command not found on PATH"
 loader = importlib.machinery.SourceFileLoader("sshfling_under_test", cmd)
 spec = importlib.util.spec_from_loader(loader.name, loader)
 sshfling = importlib.util.module_from_spec(spec)
