@@ -1,0 +1,23 @@
+# Template file for 'sshfling'
+pkgname=sshfling
+version=0.1.11
+revision=1
+depends="python3 openssh shadow procps-ng util-linux"
+short_desc="Temporary SSH certificate issuer and access CLI"
+maintainer="GRWLX <44076838+GRWLX@users.noreply.github.com>"
+license="LicenseRef-SSHFling-Commercial"
+homepage="https://grwlx.github.io/sshfling"
+distfiles="https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz"
+checksum=324db74ac9f35977c89fe2922ace7609251915fc2e9b67e468d8f56e6f4ecef8
+
+do_install() {
+	vbin bin/sshfling
+	vinstall production/sshfling-session 755 usr/share/sshfling/templates/production
+	vinstall packaging/policy.json 644 etc/sshfling
+	vlicense LICENSE
+	vdoc README.md
+	vmkdir usr/share/sshfling/templates
+	for path in .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd; do
+		vcopy "$path" usr/share/sshfling/templates
+	done
+}

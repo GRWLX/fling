@@ -1,0 +1,18 @@
+{
+  "version": "0.1.11",
+  "description": "Temporary SSH certificate issuer and access CLI",
+  "homepage": "https://grwlx.github.io/sshfling",
+  "license": {
+    "identifier": "Proprietary",
+    "url": "https://github.com/GRWLX/sshfling/blob/main/LICENSE"
+  },
+  "url": "https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11-windows.zip",
+  "hash": "aaaf942ef71ccc06f20dce19518540a08b1e3d13a6f83897a1bde1430407e093",
+  "bin": "sshfling.cmd",
+  "checkver": {
+    "github": "https://github.com/GRWLX/sshfling"
+  },
+  "autoupdate": {
+    "url": "https://grwlx.github.io/sshfling/downloads/sshfling-$version-windows.zip"
+  }
+}

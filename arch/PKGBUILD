@@ -1,0 +1,25 @@
+pkgname=sshfling
+pkgver=0.1.11
+pkgrel=1
+pkgdesc="Temporary SSH certificate issuer and access CLI"
+arch=('any')
+url="https://grwlx.github.io/sshfling"
+license=('LicenseRef-SSHFling-Commercial')
+depends=('python' 'openssh' 'shadow' 'procps-ng' 'util-linux')
+optdepends=('docker: Docker Compose test harness')
+backup=('etc/sshfling/policy.json')
+source=("${pkgname}-${pkgver}.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz")
+sha256sums=('324db74ac9f35977c89fe2922ace7609251915fc2e9b67e468d8f56e6f4ecef8')
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  install -Dm755 bin/sshfling "${pkgdir}/usr/bin/sshfling"
+  install -Dm755 production/sshfling-session "${pkgdir}/usr/share/sshfling/templates/production/sshfling-session"
+  install -Dm644 packaging/policy.json "${pkgdir}/etc/sshfling/policy.json"
+  install -Dm644 systemd/sshflingd.service "${pkgdir}/usr/lib/systemd/system/sshflingd.service"
+  install -Dm644 systemd/sshflingd.env.example "${pkgdir}/usr/share/doc/sshfling/sshflingd.env.example"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/sshfling/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/sshfling/README.md"
+  install -d "${pkgdir}/usr/share/sshfling/templates"
+  cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd "${pkgdir}/usr/share/sshfling/templates/"
+}

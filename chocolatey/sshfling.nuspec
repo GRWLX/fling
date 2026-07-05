@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>sshfling</id>
+    <version>0.1.11</version>
+    <title>SSHFling</title>
+    <authors>GRWLX</authors>
+    <owners>GRWLX</owners>
+    <licenseUrl>https://github.com/GRWLX/sshfling/blob/main/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/GRWLX/sshfling</projectUrl>
+    <packageSourceUrl>https://github.com/GRWLX/sshfling</packageSourceUrl>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <description>Temporary SSH certificate issuer and access CLI.</description>
+    <summary>Temporary SSH certificate issuer and access CLI.</summary>
+    <tags>ssh openssh certificate temporary-access cli</tags>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

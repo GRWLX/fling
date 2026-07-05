@@ -1,0 +1,24 @@
+bin/sshfling
+libexec/sshfling-session
+@sample etc/sshfling/policy.json.sample
+share/sshfling/templates/.env.example
+share/sshfling/templates/LICENSE
+share/sshfling/templates/README.md
+share/sshfling/templates/compose.client.yml
+share/sshfling/templates/compose.server.yml
+share/sshfling/templates/production/sshfling-session
+share/sshfling/templates/scripts/create-network.sh
+share/sshfling/templates/scripts/generate-ssh-key.sh
+share/sshfling/templates/scripts/install-local.sh
+share/sshfling/templates/scripts/uninstall-local.sh
+share/sshfling/templates/secrets/.gitkeep
+share/sshfling/templates/ssh-client/Dockerfile
+share/sshfling/templates/ssh-client/entrypoint.sh
+share/sshfling/templates/ssh-server/Dockerfile
+share/sshfling/templates/ssh-server/entrypoint.sh
+share/sshfling/templates/ssh-server/limited-session.sh
+share/sshfling/templates/ssh-server/sshd_config
+share/sshfling/templates/systemd/sshflingd.env.example
+share/sshfling/templates/systemd/sshflingd.service
+%%DOCSDIR%%/LICENSE
+%%DOCSDIR%%/README.md

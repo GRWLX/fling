@@ -1,0 +1,38 @@
+version: 1
+script:
+  - mkdir -p AppDir/usr/bin AppDir/usr/share/sshfling/templates
+  - cp bin/sshfling AppDir/usr/bin/sshfling
+  - cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd AppDir/usr/share/sshfling/templates/
+  - chmod 0755 AppDir/usr/bin/sshfling
+  - install -Dm755 AppDir/usr/bin/sshfling AppDir/AppRun
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: io.github.grwlx.sshfling
+    name: SSHFling
+    icon: utilities-terminal
+    version: 0.1.11
+    exec: usr/bin/sshfling
+    exec_args: "$@"
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: deb http://archive.ubuntu.com/ubuntu/ noble main universe
+    include:
+      - python3
+      - openssh-client
+      - passwd
+      - procps
+      - util-linux
+  files:
+    include:
+      - /usr/bin/python3*
+      - /usr/bin/ssh*
+      - /usr/sbin/chpasswd
+      - /usr/sbin/useradd
+      - /usr/sbin/usermod
+      - /usr/sbin/chage
+      - /usr/bin/ps
+      - /usr/bin/flock
+      - /usr/lib/python3*
+    exclude: []

@@ -1,0 +1,3 @@
+SSHFling issues short-lived OpenSSH user certificates and installs a forced
+session wrapper so temporary SSH sessions are capped by a server-side
+wall-clock timeout.

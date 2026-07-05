@@ -1,0 +1,27 @@
+# Contributor: GRWLX <44076838+GRWLX@users.noreply.github.com>
+# Maintainer: GRWLX <44076838+GRWLX@users.noreply.github.com>
+pkgname=sshfling
+pkgver=0.1.11
+pkgrel=0
+pkgdesc="Temporary SSH certificate issuer and access CLI"
+url="https://grwlx.github.io/sshfling"
+arch="noarch"
+license="LicenseRef-SSHFling-Commercial"
+depends="python3 openssh-client shadow procps util-linux"
+options="!check"
+source="$pkgname-$pkgver.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz"
+builddir="$srcdir/$pkgname-$pkgver"
+
+package() {
+	install -Dm755 "$builddir/bin/sshfling" "$pkgdir/usr/bin/sshfling"
+	install -Dm755 "$builddir/production/sshfling-session" "$pkgdir/usr/share/sshfling/templates/production/sshfling-session"
+	install -Dm644 "$builddir/packaging/policy.json" "$pkgdir/etc/sshfling/policy.json"
+	install -Dm644 "$builddir/LICENSE" "$pkgdir/usr/share/licenses/sshfling/LICENSE"
+	install -Dm644 "$builddir/README.md" "$pkgdir/usr/share/doc/sshfling/README.md"
+	mkdir -p "$pkgdir/usr/share/sshfling/templates"
+	cp -a "$builddir"/.env.example "$builddir"/LICENSE "$builddir"/README.md "$builddir"/compose.server.yml "$builddir"/compose.client.yml 		"$builddir"/scripts "$builddir"/secrets "$builddir"/ssh-client "$builddir"/ssh-server "$builddir"/production "$builddir"/systemd 		"$pkgdir/usr/share/sshfling/templates/"
+}
+
+sha512sums="
+fdd0f2aae6d72c59df38db12fb72d5dfe1b7b225cb22c16e2f09ffc8cc45eef39aabb5b0d6758c34299192b0e98a9e3406fb089c6b4a603eab49ae7bf73b9a34  $pkgname-$pkgver.tar.gz
+"

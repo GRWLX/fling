@@ -1,0 +1,41 @@
+name: sshfling
+base: core24
+version: '0.1.11'
+summary: Temporary SSH certificate issuer and access CLI
+description: |
+  SSHFling issues short-lived OpenSSH user certificates and installs a forced
+  session wrapper so temporary SSH sessions are capped by a server-side
+  wall-clock timeout.
+license: Proprietary
+grade: stable
+confinement: classic
+
+apps:
+  sshfling:
+    command: bin/sshfling
+    environment:
+      SSHFLING_TEMPLATE_DIR: $SNAP/share/sshfling/templates
+
+parts:
+  sshfling:
+    plugin: dump
+    source: https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz
+    organize:
+      bin/sshfling: bin/sshfling
+      .env.example: share/sshfling/templates/.env.example
+      LICENSE: share/sshfling/templates/LICENSE
+      README.md: share/sshfling/templates/README.md
+      compose.server.yml: share/sshfling/templates/compose.server.yml
+      compose.client.yml: share/sshfling/templates/compose.client.yml
+      scripts: share/sshfling/templates/scripts
+      secrets: share/sshfling/templates/secrets
+      ssh-client: share/sshfling/templates/ssh-client
+      ssh-server: share/sshfling/templates/ssh-server
+      production: share/sshfling/templates/production
+      systemd: share/sshfling/templates/systemd
+    stage-packages:
+      - python3
+      - openssh-client
+      - passwd
+      - procps
+      - util-linux

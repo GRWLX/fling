@@ -1,0 +1,5 @@
+$NetBSD$
+
+BLAKE2s (sshfling-0.1.11.tar.gz) = b8bc00336006f5d6e23784a8eedb936f4a4c5460b8588cb2ad8ee0434a49934e
+SHA512 (sshfling-0.1.11.tar.gz) = fdd0f2aae6d72c59df38db12fb72d5dfe1b7b225cb22c16e2f09ffc8cc45eef39aabb5b0d6758c34299192b0e98a9e3406fb089c6b4a603eab49ae7bf73b9a34
+Size (sshfling-0.1.11.tar.gz) = 81817 bytes

@@ -1,0 +1,12 @@
+PackageIdentifier: GRWLX.SSHFling
+PackageVersion: 0.1.11
+InstallerType: wix
+Scope: machine
+UpgradeBehavior: install
+ReleaseDate: 2026-07-05
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/GRWLX/sshfling/releases/download/v0.1.11/sshfling-0.1.11.msi
+    InstallerSha256: 2D8D9D1DA3D49826D80C1C99B9D12AC0DD4280FF0280CE6A6D8BD9F5C0BDE03E
+ManifestType: installer
+ManifestVersion: 1.9.0
