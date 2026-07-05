@@ -362,8 +362,10 @@ The current OS/package target matrix is in [docs/build-targets.md](docs/build-ta
 
 GitHub Actions workflows are included for public distribution:
 
+- `Container image tests` builds packages into Docker-based install targets and runs the SSHFling server/client image smoke tests through `make test-containers`.
 - `Release packages without web` builds release artifacts only.
 - `Release packages with public web` publishes a GitHub Pages package site for commands such as `sudo apt install -y sshfling`, `sudo dnf install -y sshfling`, Homebrew, macOS `.pkg`, Windows MSI installs, and community package manifests for BSDs, Arch/AUR, Alpine, Nix, Guix, Void, Gentoo, Slackware, openSUSE OBS, Snapcraft, Termux, AppImage, Scoop, winget, and Chocolatey.
+- `Package install tests` installs from the published package site and verifies the requested `sshfling` version across Linux package repos and community package manifests.
 - `Cross OS validation` installs or builds those outputs across Linux, BSD, macOS, and Windows and checks the 24-hour policy default, copied service templates, active-session PID fields, and detached job PID lifecycle.
 
 Nix users can also run from the repository:
