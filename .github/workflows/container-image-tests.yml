@@ -33,6 +33,7 @@ jobs:
         env:
           SSHFLING_VERSION: ${{ github.event.inputs.version || '' }}
           REPOSITORY: ${{ github.repository }}
+          NIX_CONFIG: access-tokens = github.com=${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -n "${SSHFLING_VERSION}" ]]; then

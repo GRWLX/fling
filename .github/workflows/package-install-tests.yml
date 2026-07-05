@@ -131,11 +131,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Build generated Nix flake
+        env:
+          NIX_CONFIG: access-tokens = github.com=${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p nix-test
           curl -fsSL https://grwlx.github.io/sshfling/nix/flake.nix -o nix-test/flake.nix
-          docker run --rm -v "$PWD/nix-test:/work" nixos/nix:2.24.9 sh -lc 'set -eu
+          docker run --rm -e NIX_CONFIG -v "$PWD/nix-test:/work" nixos/nix:2.24.9 sh -lc 'set -eu
           cd /work
           NIXPKGS_ALLOW_UNFREE=1 nix --extra-experimental-features "nix-command flakes" build --impure .#default -o result
           ./result/bin/sshfling --version | grep -q "sshfling ${{ inputs.version }}"

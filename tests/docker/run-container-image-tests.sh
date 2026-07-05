@@ -34,9 +34,10 @@ safe_name() {
 
 start_container() {
   local image="$1"
+  shift
   local name="sshfling-$(safe_name "$image")-$$-${#containers[@]}"
   docker rm -f "$name" >/dev/null 2>&1 || true
-  docker run -d --name "$name" "$image" sh -lc 'sleep 3600' >/dev/null
+  docker run -d --name "$name" "$@" "$image" sh -lc 'sleep 3600' >/dev/null
   containers+=("$name")
   last_container="$name"
 }
@@ -277,7 +278,11 @@ test_void() {
 
 test_nix() {
   local name
-  start_container nixos/nix:2.24.9
+  local nix_env=()
+  if [[ -n "${NIX_CONFIG:-}" ]]; then
+    nix_env=(-e NIX_CONFIG)
+  fi
+  start_container nixos/nix:2.24.9 "${nix_env[@]}"
   name="$last_container"
   copy_validate "$name"
   docker cp "$tmp/site/downloads/sshfling-${version}.tar.gz" "$name:/tmp/sshfling-${version}.tar.gz"
