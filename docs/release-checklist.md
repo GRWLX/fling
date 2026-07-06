@@ -14,6 +14,10 @@ Use this checklist before publishing enterprise package artifacts.
 
 - `git status --short --branch` is clean before tagging, apart from intentional release-note edits.
 - Generated package outputs stay out of source commits: `build/`, `dist/`, `public/`, `package-dist/`, and `release-dist/`.
+- Generated release evidence and platform matrices stay out of source commits:
+  keep them under ignored paths such as
+  `docs/release/enterprise-release-evidence/` and attach or link reviewed
+  output from the release ticket.
 - Remove interpreter caches and local byproducts such as `__pycache__/`, `.pytest_cache/`, and local logs.
 - Check that no local secrets or package credentials are staged: `.env`, `.env.*`, private keys, package-manager credentials, and non-placeholder `secrets/` files.
 - Run `make clean` before rebuilding local package artifacts from the exact candidate commit.
@@ -23,8 +27,16 @@ Use this checklist before publishing enterprise package artifacts.
 - Use GitHub generated release notes as a starting point, then add a short enterprise-facing summary.
 - Call out security-relevant behavior changes, install or uninstall changes, upgrade impact, policy defaults, and compatibility notes.
 - Confirm access behavior is described accurately: password access is the default, certificate access requires `--certificate`, and certificate-specific setup options are not implicit.
-- Confirm cleanup behavior is described accurately: `password prune` removes expired tracked grants only, `--all` does not remove active grants, `--delete-users` only deletes expired SSHFling-created users, break-glass existing-user grants are locked/expired but not deleted, and package uninstall preserves `/etc/sshfling` configuration without restoring dependency state.
+- Confirm cleanup behavior is described accurately: `password prune` removes expired tracked grants only, `--all` does not remove active grants, `--delete-users` only deletes expired SSHFling-created users, break-glass existing-user grants are locked/expired but not deleted, and package uninstall preserves `/etc/sshfling` configuration without restoring dependency state or original host configuration.
+- Confirm [Install and uninstall runbook](install-uninstall.md) covers every
+  advertised channel for the release: Linux DEB/RPM files, signed public APT/RPM
+  repos, macOS pkg/Homebrew, Windows MSI/zip/winget/Scoop/Chocolatey,
+  BSD/community manifests, containers, and dependency/original-state caveats.
 - List supported package artifacts and target ecosystems for the release.
+- List platform coverage precisely. Use exact OS versions, package formats,
+  Python/OpenSSH versions where known, CPU architectures, hardware classes, and
+  ARM/IoT/FPGA scope; do not summarize this as broad Linux, ARM, embedded, or
+  FPGA support unless the release evidence backs the claim.
 - Include checksum location and the signing-key fingerprint used for APT/RPM metadata, or explicitly state when a generated test key was used.
 - Record validation workflow links for `Container image tests`, `Release packages without web`, `Release packages with public web`, `Package install tests`, and `Cross OS validation`.
 
@@ -49,6 +61,75 @@ make test-containers
 
 - Confirm release assets include the expected `.deb`, `.rpm`, `.pkg`, `.msi`, Windows zip, source tarball, and `SHA256SUMS`.
 - Confirm the public package site has APT/RPM metadata, repository signing files when production signing is enabled, Homebrew and macOS installer scripts, Windows installer scripts, and generated community manifests.
+- Confirm the install/uninstall runbook matches generated file names, public
+  site paths, package identifiers, uninstall scope, and checksum/signing
+  verification commands for the release.
+- Confirm macOS pkg metadata includes the package notes/license and Windows MSI metadata includes Add/Remove Programs uninstall and dependency scope.
+- Capture a compact platform coverage declaration for the release. Keep any
+  generated matrix in the ignored release evidence directory and retain only
+  links, hashes, summaries, and exception IDs in tracked docs or release notes.
+
+Required platform coverage evidence:
+
+| Coverage area | Evidence to capture |
+| --- | --- |
+| OS versions | `os-release`, platform version command, package format, install source, validation workflow run URL, and package install result. |
+| Language/runtime | `python3 --version`, OpenSSH `ssh -V` and `sshd -V` where available, shell or PowerShell version, and account-management tool availability for password grants. |
+| CPU architecture | `uname -m`, package metadata architecture, or runner architecture for each support claim, including `x86_64`/`amd64`, `arm64`/`aarch64`, and any 32-bit or non-mainstream architecture. |
+| Hardware class | VM, container, desktop, server, edge appliance, IoT gateway, embedded Linux host, or customer-managed hardware evidence. |
+| ARM and IoT | Client-only, certificate-server, or password-server mode tested; required host tools present; storage, clock, and service-manager assumptions recorded. |
+| FPGA and SoC | Host CPU/OS control-plane evidence only, unless bitstream, accelerator, vendor board support package, or FPGA toolchain evidence is separately approved. |
+| Deferred targets | Exception ID, owner, customer impact, expiration, compensating control, and retest trigger. |
+
+## v0.1.12/vNext Follow-Up Checks
+
+Use this sequence for the next enterprise release candidate. Replace `0.1.12`
+with the final package version if vNext is cut as a later patch.
+
+```bash
+git status --short --branch
+make clean
+make test
+make test-containers
+make release-package-rehearsal VERSION=0.1.12
+make release-security-scan VERSION=0.1.12
+make release-security-evidence-validate
+make package VERSION=0.1.12
+make release-assets-evidence VERSION=0.1.12
+make release-matrix-validate \
+  RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
+  RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
+```
+
+Attach or link the generated security scan report, SBOM, dependency inventory,
+license report, release asset inventory, matrix files, manifest files, package
+checksums, platform coverage declaration, and workflow logs. Keep generated
+matrices and manifests in ignored release-evidence paths; do not stage them as
+tracked source files. If optional external scanners are skipped, record that as
+a release-ticket limitation unless `make release-security-scan-strict` is the
+approved gate.
+
+For `v0.1.12`, GitHub state checked on 2026-07-06 shows a published release and
+asset list, a passing tag-scoped `Release packages without web` run, and a
+passing tag/source-commit `Container image tests` run. It also shows a failed
+tag-scoped `Release packages with public web` run, no tag-scoped `Package
+install tests` run found, and no tag-scoped `Cross OS validation` run found.
+Do not substitute older workflow-dispatch successes from earlier SHAs or
+post-tag GitHub Packages workflow runs as final `v0.1.12` validation unless the
+release ticket explicitly records the mismatch and approval.
+
+Do not treat the vNext candidate as publishable until these version-specific
+items are present:
+
+- Clean release commit and matching tag or protected workflow input.
+- `Release packages without web`, `Release packages with public web`, `Package install tests`, `Cross OS validation`, and `Container image tests` run URLs.
+- GitHub release asset list, `SHA256SUMS`, provenance or attestation output, and package-site deployment reference.
+- Platform coverage evidence for advertised OS versions, Python/OpenSSH
+  versions, CPU architectures, hardware classes, ARM/IoT targets, and FPGA/SoC
+  host control-plane claims.
+- Production APT/RPM signing-key fingerprint and evidence that generated test signing keys were not used.
+- macOS notarization and Windows Authenticode evidence, or approved exception records with expiration and re-test dates.
+- Runtime behavior docs and release notes matching password default, explicit certificate mode, prune semantics, and uninstall scope.
 
 ## Publish Gate
 
@@ -64,7 +145,19 @@ Do not publish an enterprise release until these are fixed or formally excepted:
 - Docs or release notes describe certificate access as the default.
 - Docs or release notes omit that certificate setup requires `--certificate`.
 - Docs or release notes overstate `password prune` cleanup by implying active grants or unmanaged records are removed, or by implying existing users are deleted instead of locked/expired.
-- Docs or release notes imply package uninstall removes `/etc/sshfling` configuration or restores package-manager dependencies such as Python, OpenSSH, account-management tools, `procps`, or `util-linux`.
+- Docs, release notes, or package metadata imply package uninstall removes `/etc/sshfling` configuration, restores original host SSH configuration, or restores package-manager dependencies such as Python, OpenSSH, account-management tools, `procps`, or `util-linux`.
+- Docs or release notes omit explicit install and uninstall commands for a
+  package channel advertised in the release artifacts, package site, or
+  community manifest list.
+- Docs, release notes, package metadata, or sales-facing copy claim broad OS,
+  language, ARM, IoT, embedded, hardware appliance, or FPGA support without
+  release evidence or an approved exception.
+- Generated release evidence, matrices, package trees, or local scan outputs
+  are staged for commit instead of remaining ignored artifacts linked from the
+  release ticket.
+- A failed workflow run for the target tag/source commit is being cited as
+  passing evidence, or a successful run from a different commit is being used
+  without explicit release-ticket approval of the mismatch.
 - Production APT/RPM repository publication uses an ephemeral signing key, lacks an approved repository signing fingerprint, or requires weak trust settings such as `trusted=yes`, `gpgcheck=0`, or `repo_gpgcheck=0`.
 - Required macOS notarization, Windows Authenticode signing, release approval, validation evidence, rollback owner, or exception records are missing.
 - The release claims SOC 2, ISO 27001, NIST, FedRAMP, or similar compliance certification without an approved external attestation or certification record.

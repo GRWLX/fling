@@ -25,6 +25,12 @@ $Stage = Join-Path $BuildRoot "stage"
 $Dist = Join-Path $RepoRoot "dist"
 $ProductDir = Join-Path $Stage "SSHFling"
 $TemplateDir = Join-Path $ProductDir "templates"
+$Manufacturer = "SSHFling Maintainers"
+$AboutUrl = "https://github.com/GRWLX/sshfling"
+$HelpUrl = "https://github.com/GRWLX/sshfling/issues"
+$PackageDescription = "Temporary SSH access broker and CLI"
+$UninstallScope = "Uninstall removes package files and PATH entry only; host SSH state, local policy, CA material, and dependencies are managed separately."
+$DependencyScope = "The MSI does not bundle or remove Python, OpenSSH, or Windows OpenSSH Server components."
 
 foreach ($tool in @("candle.exe", "light.exe", "heat.exe")) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
@@ -38,6 +44,20 @@ New-Item -ItemType Directory -Force -Path $ProductDir, $TemplateDir, $Dist | Out
 Copy-Item -Force (Join-Path $RepoRoot "bin\sshfling") (Join-Path $ProductDir "sshfling.py")
 Copy-Item -Force (Join-Path $RepoRoot "packaging\policy.json") (Join-Path $ProductDir "policy.json")
 Copy-Item -Force (Join-Path $RepoRoot "LICENSE") (Join-Path $ProductDir "LICENSE")
+
+@"
+SSHFling $Version package notes
+
+Runtime dependencies:
+- The MSI does not bundle Python, OpenSSH, or Windows OpenSSH Server.
+- Client commands require Python and OpenSSH client tools on PATH.
+- Server-side host setup requires the target host's OpenSSH server tooling.
+
+Uninstall and revert scope:
+- MSI uninstall removes files under the SSHFling install directory and the PATH entry added by the MSI.
+- It does not remove Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, temporary grant state, CA material, or policy/configuration stored outside the install directory.
+- Exact preinstall state restoration must come from Intune, Group Policy, configuration management, backups, or another source of recorded original state.
+"@ | Set-Content -Encoding ASCII (Join-Path $ProductDir "PACKAGE-NOTES.txt")
 
 @"
 @echo off
@@ -85,16 +105,24 @@ heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg 
 @"
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="$ProductCode" Name="SSHFling" Language="1033" Version="$Version" Manufacturer="SSHFling Maintainers" UpgradeCode="$UpgradeCode">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+  <Product Id="$ProductCode" Name="SSHFling" Language="1033" Version="$Version" Manufacturer="$Manufacturer" UpgradeCode="$UpgradeCode">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Manufacturer="$Manufacturer" Description="$PackageDescription" Comments="$UninstallScope" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of SSHFling is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPCOMMENTS" Value="$UninstallScope" />
+    <Property Id="ARPHELPLINK" Value="$HelpUrl" />
+    <Property Id="ARPURLINFOABOUT" Value="$AboutUrl" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLFOLDER" Name="SSHFling">
           <Component Id="PathComponent" Guid="5B92775A-4A2D-4E65-AE38-43B17117697D">
             <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes" />
+            <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="Version" Value="$Version" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="UninstallScope" Value="$UninstallScope" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="DependencyScope" Value="$DependencyScope" Type="string" />
             <Environment Id="PathSSHFling" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
           </Component>
         </Directory>

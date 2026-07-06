@@ -9,19 +9,32 @@ Repository: `/workspace/project/tempSSh`
 SSHFling is a temporary SSH access broker. The strongest current controls are
 that password grants are the default production grant path, OpenSSH
 certificates are explicit with `--certificate` for policy or platform-specific
-cases, Docker sshd disables common forwarding paths, and the tracked repository
-does not contain real private keys, cloud keys, or credentialed connection
-strings.
+cases, issuer services default to loopback, the public package-site workflow
+has signed-repository deployment gates, and the tracked repository does not
+contain real private keys, cloud keys, or credentialed connection strings.
 
-The highest risks are in release/package trust, issuer and CA isolation, and the gap between "temporary access" and host-level process/account containment. Several findings are design or operational risks that become critical when the issuer, web console, or Docker harness is exposed beyond localhost, or when grants target `root` or a privileged deploy account.
+The remaining highest risks are release/package trust, issuer and CA isolation,
+repository signing key custody, expired-access deletion evidence, and the gap
+between "temporary access" and host-level process/account containment. Several
+findings are operational risks that become critical when the issuer or web
+console is exposed beyond localhost, when grants target `root` or a privileged
+deploy account, or when AI-assisted work lacks durable breadcrumbs.
 
-Recommended first fixes:
+Recommended remaining priorities:
 
-1. Sign package repositories and remove `trusted=yes`, `gpgcheck=0`, and pipe-to-shell production install guidance.
-2. Fix `sshfling serve` so the packaged systemd service can run unprivileged, then make `/etc/sshfling` read-only to the daemon.
-3. Remove request-controlled `login_user` from the issuer API or bind it to a server-side principal/account map.
-4. Add hard containment for sessions and detached jobs using cgroups/systemd scopes, not only child-process traversal.
-5. Refuse password grants for existing Unix users by default.
+1. Prove production release controls outside the repo: protected tags,
+   protected Pages environment, signer access review, and completed release
+   evidence packet.
+2. Put CA and repository signing keys behind managed custody or dual-control
+   access, with rotation and access-review evidence.
+3. Add hard containment for sessions and detached jobs using cgroups/systemd
+   scopes, not only child-process traversal.
+4. Package or document a fleet timer for expired password-grant pruning and
+   deletion evidence.
+5. Wire release security scanning into required publication workflows and define
+   critical/high blocking thresholds.
+6. Require durable AI-operation breadcrumbs: ticket-shaped grant/job names,
+   centralized logs, worker-owned paths, and workflow validation links.
 
 ## Fix Pass Summary
 
@@ -34,19 +47,88 @@ Status as of 2026-07-06 current worktree:
 - Partially remediated session escape risk: detached work is denied from forced-command sessions by default, can only be allowed by a trusted wrapper flag, is capped to remaining session time when allowed, and has an active-job cap. Full cgroup/systemd-scope containment remains residual work.
 - Remediated Docker harness defaults: localhost host-port binding by default, expanded `.dockerignore`, read-only root filesystems, dropped capabilities, `no-new-privileges`, pids limits, tmpfs runtime paths, runtime host keys, and optional pinned host-key verification for the client.
 - Remediated systemd hardening gaps: root-owned config/CA material with group read access, no daemon write access to `/etc/sshfling`, and additional unit sandboxing directives.
+- Strengthened release security evidence: the standard-library scanner now emits redacted secret findings, built-in shell and Python static-security reports, key-custody source evidence, and skipped-by-default optional SCA hooks including OSV-Scanner. This is evidence generation, not a proven blocking CI gate until a release workflow invokes it and release policy defines blocking thresholds.
+
+## Threat Model Addendum
+
+The repository-grounded threat model is now maintained in
+`docs/threat-model.md`. It covers temporary SSH access, package publishing,
+signing keys, expired access deletion, and agentic breadcrumbs.
+
+Current high-value assets:
+
+- Temporary passwords, generated client keys, OpenSSH user certificates, and
+  the SSHFling user CA private key.
+- Repository signing private key, approved signing fingerprint, GitHub release
+  workflows, release assets, package-site outputs, and provenance attestations.
+- macOS Developer ID and notarization records, Windows Authenticode
+  certificate records, and platform coverage declarations where enterprise
+  desktop or hardware support is claimed.
+- `/etc/sshfling/policy.json`, password grant metadata, managed sshd snippets,
+  the `sshfling-session` wrapper, and host Unix accounts.
+- System logs, detached job metadata/logs, task prompts, worker-owned path
+  records, release tickets, and validation workflow links.
+
+Key trust boundaries:
+
+- Operator or AI workstation to OpenSSH on the target host.
+- OpenSSH `ForceCommand` to `production/sshfling-session`.
+- Issuer HTTP client to `sshfling serve`, then to the local CA private key.
+- Root/operator CLI to policy files, grant metadata, host sshd snippets, and
+  Unix account management tools.
+- GitHub Actions release workflows to GitHub Releases, Pages, package managers,
+  and enterprise fleet hosts.
+- Agentic task prompts and detached job logs to the repository/change record.
+
+Top abuse paths to keep in review:
+
+1. Compromised workflow or package site publishes malicious packages that run as
+   root/admin on installing hosts.
+2. Repository signing key theft allows signed malicious APT/RPM metadata.
+3. Issuer token theft plus remote exposure mints certificates for allowed
+   principals.
+4. CA private key theft signs certificates outside SSHFling, potentially
+   without the expected force command or lifetime.
+5. A temporary grant to `root` or a privileged deploy account gives full account
+   blast radius during the access window.
+6. Re-parented, scheduler-managed, or service-managed processes outlive the
+   wrapper if host cgroup/systemd containment is not used.
+7. Expired password grants remain as stale managed state when no prune timer or
+   fleet cleanup job runs.
+8. AI-assisted changes become hard to audit when grants, detached jobs, logs,
+   worker-owned paths, and workflow links are not tied to a ticket.
+
+Evidence gaps:
+
+- GitHub tag protection, branch protection, Pages environment approval,
+  required reviewers, release approvers, and secret access reviews are not
+  visible in source and must be attached as release evidence.
+- CA and repository signing key storage, dual control, and rotation are not
+  proven by the repo. The release scanner now checks source-controlled custody
+  markers, but production key-owner, storage, rotation, and access-review
+  records must still be attached as external evidence.
+- The macOS and Windows builders produce `.pkg`, `.msi`, and `.zip` artifacts
+  but do not perform Apple notarization/stapling or Authenticode signing.
+- Artifact and package-site matrices do not prove every OS/runtime/CPU/hardware
+  support claim; ARM, IoT, embedded, and FPGA/SoC control-plane claims need
+  release-specific validation or explicit exceptions.
+- `sshfling password prune` exists, but no packaged timer currently proves
+  expired-access deletion happens automatically.
+- The wrapper enforces time by process-tree cleanup; cgroup/systemd scope
+  containment remains an operational control.
+- Agentic breadcrumbs are documented but are not enforced as required CLI
+  fields or centrally retained artifacts.
 
 ## Scope And Method
 
-Reviewed tracked source, scripts, Dockerfiles, Compose files, systemd units, docs, packaging workflows, and tests. Generated local build outputs, binary packages, and bytecode were not inspected except where source workflows generate or publish them.
+Reviewed tracked source, scripts, Dockerfiles, Compose files, systemd units,
+docs, packaging workflows, and tests. Generated local build outputs, binary
+packages, live GitHub settings, external signing systems, and bytecode were not
+inspected except where source workflows generate or publish them.
 
-Four read-only sub-agents were used:
-
-- Application Security Engineer
-- Security Architect
-- Senior SecOps Engineer
-- Penetration Tester
-
-The `security-best-practices` skill has no shell/Docker/systemd-specific reference file, so this report applies general secure operations practice plus the selected agent guidance.
+The `security-best-practices` skill has no shell/Docker/systemd-specific
+reference file, so this report applies general secure operations practice plus
+repository-grounded evidence.
 
 ## Positive Observations
 
@@ -411,15 +493,15 @@ Remediation:
 - Include principal, login user, key fingerprint, certificate serial, source IP, TTL, outcome, and actor.
 - Do not log passwords, bearer tokens, cookies, or private keys.
 
-### SEC-017: CI Lacks Security Gates
+### SEC-017: Release Security Scan Exists But Is Not A Blocking CI Gate
 
 Severity: Medium
 
 Evidence:
 
-- `.github/workflows/container-image-tests.yml:32` runs functional container tests.
-- `.github/workflows/release-packages.yml:87` runs `make test`.
-- No tracked workflow references `gitleaks`, `trufflehog`, `semgrep`, `trivy`, `hadolint`, `shellcheck`, or `systemd-analyze security`.
+- `Makefile:51` defines `release-security-scan`; `Makefile:54` and `Makefile:57` define optional and strict optional scanner targets for evidence generation.
+- `tools/release_security_scan.py:1242`, `tools/release_security_scan.py:1262`, `tools/release_security_scan.py:1272`, `tools/release_security_scan.py:1312`, and `tools/release_security_scan.py:1330` add optional scanner hooks for `shellcheck`, `hadolint`, `systemd-analyze security`, `gitleaks`, and `trivy`.
+- The reviewed `.github/workflows/*.yml` files do not invoke `make release-security-scan` or define critical/high findings as required blockers before publishing.
 
 Impact: Secret leaks, insecure shell patterns, vulnerable images, and service hardening regressions can ship without a blocking signal.
 
@@ -458,5 +540,14 @@ Remediation:
 
 - Severity rises if `sshflingd` or the web console is exposed off-host.
 - Severity rises if grants are commonly issued to `root`, sudo-enabled users, or deployment accounts with write access to app/runtime paths.
+- Production release risk remains high until protected tag/environment approvals,
+  secret access reviews, and signing-key custody records are attached as
+  external evidence.
+- Enterprise desktop distribution remains a gap until macOS notarization and
+  Windows Authenticode verification are produced or a time-bound exception is
+  approved.
+- Broad OS, CPU architecture, hardware, ARM/IoT, embedded, or FPGA/SoC claims
+  remain unsupported unless each release keeps platform-specific validation
+  evidence or explicit unsupported/deferred target records.
 - This review did not inspect generated `.deb`, `.rpm`, `.pkg`, `.msi`, `.zip`, local `build/`, local `dist/`, or Python bytecode artifacts.
 - No live external scanning or exploitation was performed.

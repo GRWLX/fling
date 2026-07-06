@@ -39,8 +39,37 @@ Certificate mode can also be prepared once with `sshfling host install`, which c
 - Each grant can use a meaningful temporary username, such as a ticket number, for cleaner operational review.
 - Existing SSH logs, process accounting, shell history policy, endpoint monitoring, and package integrity controls remain usable.
 
+## Access Levels And Roles
+
+SSHFling policy has an `access_level` field for least-privilege review. It classifies the privilege level of the Unix or platform account receiving the grant; it does not add the account to sudoers, local administrators, groups, roles, or IAM bindings.
+
+- `standard`: default for temporary users and ordinary accounts with no expected `sudo` or root-equivalent rights.
+- `operator`: diagnostics or approved operational commands through an existing operator account, without broad sudo.
+- `sudo-limited`: an account with a reviewed sudoers allowlist or equivalent constrained elevation.
+- `admin`: root-equivalent or local administrator access where the platform supports it; use only for approved break-glass work.
+
+Keep the policy at the lowest level that can complete the task. For example:
+
+```bash
+sudo sshfling policy install --user deploy --access-level sudo-limited --max-time 30m --max-connections 1
+sudo sshfling --certificate --username ticket-1234 --login-user deploy --access-level sudo-limited -t 10m
+```
+
+Grant requests can ask for `--access-level` or `--role`. SSHFling rejects a requested level above the effective policy level, and treats `root`, `Administrator`, and `root-equivalent` as admin-class access. Host controls such as Unix groups, sudoers, PAM, AD, MDM, and service-manager policy remain the enforcement layer for the actual privileges.
+
+## Threat-Model Checkpoints
+
+The enterprise threat model for this workflow is in [SSHFling threat model](threat-model.md). For AI-assisted operations, review these checkpoints before granting access:
+
+- Treat the temporary username, detached job name, ticket ID, wrapper PID, child PID, stdout/stderr paths, and validation workflow links as required breadcrumbs for review and rollback.
+- A named temporary account is attribution, not sandboxing. The AI tool receives the normal privileges of the Unix account it logs in as, including any `sudo`, scheduler, service-manager, filesystem, or network permissions that account already has.
+- The session wrapper enforces wall-clock expiry for the SSH session it launches, but hard containment of every descendant process depends on host controls such as systemd scopes, cgroups, and account policy.
+- Expired password grants should be pruned by an operator or fleet job. `sshfling password prune --all --delete-users` removes expired SSHFling-created users after managed sshd config removal is verified; existing break-glass users are locked/expired, not deleted.
+- Certificate mode depends on protecting the user CA private key and issuer token. Keep the issuer loopback-only unless it is behind approved TLS, mTLS, VPN, or equivalent access controls.
+- Install SSHFling from signed package repositories for managed fleets, and record the package signing fingerprint, release workflow URL, and package-site evidence in the change ticket.
+
 ## Operational Guidance
 
 Treat SSHFling as a controlled access broker, not as a replacement for change management. Use short durations, issue access per task, prefer named grants tied to tickets, and keep package and policy files managed by your normal configuration system. Use explicit certificate mode when policy forbids temporary local passwords or when the target platform is not a supported Linux password host.
 
-For higher-security environments, publish SSHFling through signed packages, protect `/etc/sshfling/policy.json`, monitor the issuer service, and alert on unexpected policy or package changes.
+For higher-security environments, publish SSHFling through signed packages, protect `/etc/sshfling/policy.json`, monitor the issuer service, alert on unexpected policy or package changes, and centralize SSHFling system logs plus detached job logs before granting long-running AI-assisted access.

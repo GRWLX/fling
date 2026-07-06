@@ -46,6 +46,27 @@ def is_external_ref(value: str) -> bool:
     return value.startswith(("http://", "https://"))
 
 
+def repo_relative(path: Path, repo_root: Path, label: str) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(repo_root.resolve()).as_posix()
+    except ValueError as exc:
+        raise SystemExit(f"{label} must stay inside repo: {path}") from exc
+
+
+def path_uses_symlink_component(root: Path, rel_path: str) -> bool:
+    if Path(rel_path).is_absolute():
+        return False
+    current = root
+    for part in Path(rel_path).parts:
+        if part in {"", "."}:
+            continue
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def load_manifest(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         raise SystemExit(f"evidence manifest not found: {path}")
@@ -83,13 +104,54 @@ def evidence_id(row: dict[str, str]) -> str:
 
 
 def manifest_covers_row(entry: dict[str, Any], row: dict[str, str]) -> bool:
-    rows = entry.get("rows") or entry.get("row_ids") or entry.get("row_id")
-    row_id = row.get("row_id", "")
+    row_id = row.get("row_id", "").strip()
+    return row_id in set(manifest_row_ids(entry))
+
+
+def manifest_row_field(entry: dict[str, Any]) -> Any:
+    if "rows" in entry:
+        return entry.get("rows")
+    if "row_ids" in entry:
+        return entry.get("row_ids")
+    return entry.get("row_id")
+
+
+def manifest_row_ids(entry: dict[str, Any]) -> list[str]:
+    rows = manifest_row_field(entry)
     if isinstance(rows, str):
-        return bool(rows) and rows == row_id
+        return [rows.strip()] if rows.strip() else []
     if isinstance(rows, list):
-        return row_id in {str(item) for item in rows}
-    return False
+        return [str(item).strip() for item in rows if str(item).strip()]
+    return []
+
+
+def validate_manifest_row_coverage(manifest: dict[str, dict[str, Any]], matrix_row_ids: set[str]) -> list[str]:
+    errors: list[str] = []
+    covered_by: dict[str, str] = {}
+
+    for eid, entry in manifest.items():
+        rows = manifest_row_field(entry)
+        if rows is None:
+            continue
+        if not isinstance(rows, (str, list)):
+            errors.append(f"manifest entry {eid} rows must be a string or list")
+            continue
+
+        row_ids = manifest_row_ids(entry)
+        seen_in_entry: set[str] = set()
+        for row_id in row_ids:
+            if row_id in seen_in_entry:
+                errors.append(f"manifest entry {eid} duplicates row_id: {row_id}")
+            seen_in_entry.add(row_id)
+            if row_id not in matrix_row_ids:
+                errors.append(f"manifest entry {eid} references unknown row_id: {row_id}")
+            previous = covered_by.get(row_id)
+            if previous and previous != eid:
+                errors.append(f"manifest row_id {row_id} is covered by multiple entries: {previous}, {eid}")
+            else:
+                covered_by[row_id] = eid
+
+    return errors
 
 
 def validate_pass_row(
@@ -99,7 +161,7 @@ def validate_pass_row(
     hash_cache: dict[Path, str],
 ) -> list[str]:
     errors: list[str] = []
-    row_id = row.get("row_id", "<missing-row-id>")
+    row_id = row.get("row_id", "").strip() or "<missing-row-id>"
     evidence_ref = row.get("evidence_ref", "").strip()
     evidence_hash = row.get("evidence_sha256", "").strip().lower()
     source_commit = row.get("source_commit", "").strip()
@@ -118,6 +180,10 @@ def validate_pass_row(
         return errors
 
     entry = manifest[eid]
+    manifest_ref = str(entry.get("evidence_ref") or entry.get("ref") or "").strip()
+    if manifest_ref and evidence_ref and manifest_ref != evidence_ref:
+        errors.append(f"{row_id}: manifest evidence_ref for {eid} does not match row")
+
     result = str(entry.get("result", "")).lower()
     if result != "pass":
         errors.append(f"{row_id}: manifest result for {eid} is {result!r}, expected 'pass'")
@@ -138,13 +204,16 @@ def validate_pass_row(
         entry.get("artifact_path") or entry.get("log_path") or entry.get("evidence_ref") or evidence_ref or ""
     ).strip()
     if artifact_path and not is_external_ref(artifact_path):
-        local_path = (repo_root / artifact_path).resolve()
+        raw_local_path = repo_root / artifact_path
+        local_path = raw_local_path.resolve()
         try:
             local_path.relative_to(repo_root.resolve())
         except ValueError:
             errors.append(f"{row_id}: manifest artifact path escapes repo: {artifact_path}")
         else:
-            if not local_path.exists():
+            if path_uses_symlink_component(repo_root, artifact_path):
+                errors.append(f"{row_id}: manifest artifact path uses symlink: {artifact_path}")
+            elif not local_path.exists():
                 errors.append(f"{row_id}: manifest artifact path does not exist: {artifact_path}")
             elif SHA256_RE.fullmatch(manifest_hash):
                 if local_path not in hash_cache:
@@ -165,6 +234,7 @@ def validate_matrix(matrix_path: Path, manifest_path: Path, repo_root: Path, max
     counts: Counter[str] = Counter()
     errors: list[str] = []
     hash_cache: dict[Path, str] = {}
+    matrix_row_ids: set[str] = set()
 
     with matrix_path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
@@ -179,22 +249,34 @@ def validate_matrix(matrix_path: Path, manifest_path: Path, repo_root: Path, max
         for row in reader:
             status = status_for_row(row)
             counts[status] += 1
-            row_id = row.get("row_id", "<missing-row-id>")
+            row_id = row.get("row_id", "").strip()
+            display_row_id = row_id or "<missing-row-id>"
             row_errors: list[str] = []
+
+            if not row_id:
+                row_errors.append("<missing-row-id>: row_id is missing")
+            elif row_id in matrix_row_ids:
+                row_errors.append(f"{row_id}: duplicate row_id in matrix")
+            else:
+                matrix_row_ids.add(row_id)
 
             if status == PASS:
                 row_errors.extend(validate_pass_row(row, manifest, repo_root, hash_cache))
             elif status == BLOCKED:
                 reason = row.get("blocker_reason", "").strip()
                 if not reason or reason in {"NONE", "NOT_APPLICABLE", "TBD"}:
-                    row_errors.append(f"{row_id}: BLOCKED row is missing blocker_reason")
+                    row_errors.append(f"{display_row_id}: BLOCKED row is missing blocker_reason")
             elif status == FAIL:
                 actual = row.get("actual_result", "").strip()
                 if not actual or actual in {"NONE", "NOT_APPLICABLE", "TBD"}:
-                    row_errors.append(f"{row_id}: FAIL row is missing actual_result")
+                    row_errors.append(f"{display_row_id}: FAIL row is missing actual_result")
 
             if len(errors) < max_errors:
                 errors.extend(row_errors[: max_errors - len(errors)])
+
+    if len(errors) < max_errors:
+        coverage_errors = validate_manifest_row_coverage(manifest, matrix_row_ids)
+        errors.extend(coverage_errors[: max_errors - len(errors)])
 
     print("matrix status counts:")
     for status, count in sorted(counts.items()):
@@ -232,11 +314,15 @@ def current_commit(repo_root: Path) -> str:
 def generate_manifest(evidence_root: Path, output: Path, repo_root: Path, source_commit: str, result: str) -> int:
     if not evidence_root.exists():
         raise SystemExit(f"evidence root not found: {evidence_root}")
+    repo_relative(evidence_root, repo_root, "evidence root")
+    repo_relative(output, repo_root, "manifest output")
     entries: list[dict[str, Any]] = []
     for path in sorted(evidence_root.rglob("*")):
+        if path.is_symlink():
+            raise SystemExit(f"evidence path must not be a symlink: {path}")
         if not path.is_file():
             continue
-        evidence_ref = path.resolve().relative_to(repo_root.resolve()).as_posix()
+        evidence_ref = repo_relative(path, repo_root, "evidence path")
         entries.append(
             {
                 "evidence_id": evidence_ref,

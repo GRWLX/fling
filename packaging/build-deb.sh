@@ -50,6 +50,10 @@ cat >"$stage/DEBIAN/postinst" <<'POSTINST'
 #!/bin/sh
 set -e
 
+state_root=/var/lib/sshfling
+state_dir=$state_root/package-state
+state_file=$state_dir/install-state
+
 group_exists() {
   if command -v getent >/dev/null 2>&1; then
     getent group sshflingd >/dev/null 2>&1
@@ -64,6 +68,34 @@ user_exists() {
   else
     grep -q '^sshflingd:' /etc/passwd
   fi
+}
+
+record_install_state() {
+  if [ -f "$state_file" ]; then
+    return 0
+  fi
+
+  group_preexisting=no
+  user_preexisting=no
+  var_dir_preexisting=no
+  if group_exists; then
+    group_preexisting=yes
+  fi
+  if user_exists; then
+    user_preexisting=yes
+  fi
+  if [ -e /var/lib/sshflingd ]; then
+    var_dir_preexisting=yes
+  fi
+
+  install -d -m 0750 -o root -g root "$state_root"
+  install -d -m 0700 -o root -g root "$state_dir"
+  {
+    echo "group_preexisting=$group_preexisting"
+    echo "user_preexisting=$user_preexisting"
+    echo "var_dir_preexisting=$var_dir_preexisting"
+  } >"$state_file"
+  chmod 0600 "$state_file"
 }
 
 ensure_account() {
@@ -104,6 +136,7 @@ reload_systemd() {
 
 case "$1" in
   configure)
+    record_install_state
     ensure_account
     install -d -m 0750 -o root -g sshflingd /etc/sshfling
     install -d -m 0750 -o sshflingd -g sshflingd /var/lib/sshflingd
@@ -146,11 +179,119 @@ cat >"$stage/DEBIAN/postrm" <<'POSTRM'
 #!/bin/sh
 set -e
 
+state_root=/var/lib/sshfling
+state_dir=$state_root/package-state
+state_file=$state_dir/install-state
+
+user_exists() {
+  if command -v getent >/dev/null 2>&1; then
+    getent passwd sshflingd >/dev/null 2>&1
+  else
+    grep -q '^sshflingd:' /etc/passwd
+  fi
+}
+
+group_exists() {
+  if command -v getent >/dev/null 2>&1; then
+    getent group sshflingd >/dev/null 2>&1
+  else
+    grep -q '^sshflingd:' /etc/group
+  fi
+}
+
+var_lib_is_empty() {
+  if [ ! -d /var/lib/sshflingd ]; then
+    return 0
+  fi
+  if find /var/lib/sshflingd -mindepth 1 -maxdepth 1 | grep -q .; then
+    return 1
+  fi
+  return 0
+}
+
+read_install_state() {
+  if [ ! -f "$state_file" ] || [ -L "$state_file" ]; then
+    return 0
+  fi
+
+  state_owner="$(stat -c %u "$state_file" 2>/dev/null || echo unknown)"
+  if [ "$state_owner" != "0" ]; then
+    echo "sshfling: ignoring non-root-owned install state $state_file" >&2
+    return 0
+  fi
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      group_preexisting)
+        if [ "$value" = "yes" ] || [ "$value" = "no" ]; then
+          group_preexisting="$value"
+        fi
+        ;;
+      user_preexisting)
+        if [ "$value" = "yes" ] || [ "$value" = "no" ]; then
+          user_preexisting="$value"
+        fi
+        ;;
+      var_dir_preexisting)
+        if [ "$value" = "yes" ] || [ "$value" = "no" ]; then
+          var_dir_preexisting="$value"
+        fi
+        ;;
+    esac
+  done < "$state_file"
+}
+
+remove_package_state() {
+  rm -rf "$state_dir"
+  rmdir "$state_root" 2>/dev/null || true
+}
+
+remove_created_account_if_safe() {
+  group_preexisting=yes
+  user_preexisting=yes
+  var_dir_preexisting=yes
+
+  read_install_state
+
+  if [ "${var_dir_preexisting:-yes}" = "no" ] && var_lib_is_empty; then
+    rmdir /var/lib/sshflingd 2>/dev/null || true
+  fi
+  remove_package_state
+
+  if [ -d /etc/sshfling ] || [ -d /var/lib/sshflingd ]; then
+    return 0
+  fi
+
+  if [ "${user_preexisting:-yes}" = "no" ] && user_exists; then
+    if command -v userdel >/dev/null 2>&1; then
+      userdel sshflingd >/dev/null 2>&1 || true
+    elif command -v deluser >/dev/null 2>&1; then
+      deluser --system sshflingd >/dev/null 2>&1 || deluser sshflingd >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [ "${group_preexisting:-yes}" = "no" ] && group_exists && ! user_exists; then
+    if command -v groupdel >/dev/null 2>&1; then
+      groupdel sshflingd >/dev/null 2>&1 || true
+    elif command -v delgroup >/dev/null 2>&1; then
+      delgroup --system sshflingd >/dev/null 2>&1 || delgroup sshflingd >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 case "$1" in
   remove|purge|abort-install|abort-upgrade|disappear)
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
       systemctl daemon-reload >/dev/null 2>&1 || true
     fi
+    ;;
+esac
+
+case "$1" in
+  purge)
+    rm -f /etc/sshfling/policy.json /etc/sshfling/sshflingd.env
+    rmdir /etc/sshfling 2>/dev/null || true
+    remove_created_account_if_safe
     ;;
 esac
 

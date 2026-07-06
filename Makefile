@@ -1,11 +1,13 @@
 PREFIX ?= $(HOME)/.local
 VERSION ?= $(shell bash packaging/resolve-version.sh)
 TEMPLATE_DIR := $(PREFIX)/share/sshfling/templates
-RELEASE_MATRIX ?= docs/release/enterprise-release-matrix.csv
-RELEASE_MANIFEST ?= docs/release/evidence-manifest.json
 RELEASE_EVIDENCE_OUTPUT_DIR ?= docs/release/enterprise-release-evidence/generated
+RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR ?= docs/release/enterprise-release-evidence/security-scans
+RELEASE_MATRIX ?= $(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv
+RELEASE_MANIFEST ?= $(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json
+RELEASE_SECURITY_SCAN_FLAGS ?=
 
-.PHONY: install-local uninstall-local test test-containers release-assets-evidence release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg clean
+.PHONY: install-local uninstall-local test test-containers test-release-security-scan release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg clean
 
 install-local:
 	install -d "$(PREFIX)/bin" "$(TEMPLATE_DIR)/scripts" "$(TEMPLATE_DIR)/secrets" "$(TEMPLATE_DIR)/ssh-client" "$(TEMPLATE_DIR)/ssh-server" "$(TEMPLATE_DIR)/production" "$(TEMPLATE_DIR)/systemd"
@@ -25,7 +27,8 @@ uninstall-local:
 	rm -rf "$(PREFIX)/share/sshfling"
 
 test:
-	python3 -m py_compile bin/sshfling tools/release_matrix_validate.py tools/generate_release_evidence.py
+	python3 -m py_compile bin/sshfling tools/release_matrix_validate.py tools/generate_release_evidence.py tools/release_security_scan.py
+	python3 -m unittest discover -s tests/release -p 'test_*.py'
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	bash -n scripts/install-local.sh scripts/uninstall-local.sh scripts/create-network.sh scripts/generate-ssh-key.sh ssh-client/entrypoint.sh ssh-server/entrypoint.sh ssh-server/limited-session.sh production/sshfling-session packaging/*.sh tests/release/*.sh
 	sh tests/cross-os/validate-cli.sh ./bin/sshfling "$(VERSION)"
@@ -36,10 +39,31 @@ test:
 test-containers:
 	SSHFLING_VERSION="$(VERSION)" bash tests/docker/run-container-image-tests.sh
 
+test-release-security-scan:
+	python3 -m unittest discover -s tests/release -p 'test_*.py'
+
+release-package-rehearsal:
+	VERSION="$(VERSION)" bash tests/release/validate-package-publishing-rehearsal.sh
+
 release-assets-evidence:
 	python3 tools/generate_release_evidence.py --mode release-assets --artifacts-dir release-dist --version "$(VERSION)" --output-dir "$(RELEASE_EVIDENCE_OUTPUT_DIR)"
 
+release-security-scan:
+	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" $(RELEASE_SECURITY_SCAN_FLAGS)
+
+release-security-scan-optional:
+	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
+
+release-security-scan-strict:
+	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools --strict-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
+
+release-security-evidence-validate:
+	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" --manifest "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json"
+
 release-matrix-validate:
+	@if [ "$(RELEASE_MATRIX)" = "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" ] && [ "$(RELEASE_MANIFEST)" = "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json" ]; then \
+		$(MAKE) release-security-scan; \
+	fi
 	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_MATRIX)" --manifest "$(RELEASE_MANIFEST)"
 
 check-package-version:

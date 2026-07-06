@@ -2,9 +2,58 @@
 set -euo pipefail
 
 prefix="${PREFIX:-$HOME/.local}"
+template_dir="$prefix/share/sshfling/templates"
 
-rm -f "$prefix/bin/sshfling"
-rm -rf "$prefix/share/sshfling"
+remove_file() {
+  local path="$1"
+  if [[ -e "$path" || -L "$path" ]]; then
+    rm -f "$path"
+    echo "Removed $path"
+  fi
+}
 
-echo "Removed $prefix/bin/sshfling"
-echo "Removed $prefix/share/sshfling"
+remove_empty_dir() {
+  local path="$1"
+  if [[ -d "$path" ]] && rmdir "$path" 2>/dev/null; then
+    echo "Removed empty directory $path"
+  fi
+}
+
+remove_file "$prefix/bin/sshfling"
+
+remove_file "$template_dir/.env.example"
+remove_file "$template_dir/LICENSE"
+remove_file "$template_dir/README.md"
+remove_file "$template_dir/compose.server.yml"
+remove_file "$template_dir/compose.client.yml"
+
+remove_file "$template_dir/scripts/install-local.sh"
+remove_file "$template_dir/scripts/uninstall-local.sh"
+remove_file "$template_dir/scripts/create-network.sh"
+remove_file "$template_dir/scripts/generate-ssh-key.sh"
+
+remove_file "$template_dir/secrets/.gitkeep"
+
+remove_file "$template_dir/ssh-client/Dockerfile"
+remove_file "$template_dir/ssh-client/entrypoint.sh"
+
+remove_file "$template_dir/ssh-server/Dockerfile"
+remove_file "$template_dir/ssh-server/sshd_config"
+remove_file "$template_dir/ssh-server/entrypoint.sh"
+remove_file "$template_dir/ssh-server/limited-session.sh"
+
+remove_file "$template_dir/production/sshfling-session"
+
+remove_file "$template_dir/systemd/sshflingd.service"
+remove_file "$template_dir/systemd/sshflingd.env.example"
+
+remove_empty_dir "$template_dir/scripts"
+remove_empty_dir "$template_dir/secrets"
+remove_empty_dir "$template_dir/ssh-client"
+remove_empty_dir "$template_dir/ssh-server"
+remove_empty_dir "$template_dir/production"
+remove_empty_dir "$template_dir/systemd"
+remove_empty_dir "$template_dir"
+remove_empty_dir "$prefix/share/sshfling"
+
+echo "Left dependencies and unmanaged files untouched."

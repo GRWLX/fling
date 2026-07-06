@@ -15,6 +15,7 @@ jobs:
   validate-version:
     name: Validate version
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -31,19 +32,34 @@ jobs:
   linux-public-repos:
     name: Linux public repo runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: validate-version
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: debian
+          - name: debian-bookworm
             image: debian:bookworm-slim
             command: |
               apt-get update >/dev/null
               apt-get install -y --no-install-recommends ca-certificates curl sudo >/dev/null
               curl -fsSL https://grwlx.github.io/sshfling/install.sh -o /tmp/sshfling-install.sh
               bash /tmp/sshfling-install.sh apt
-          - name: ubuntu
+          - name: debian-trixie
+            image: debian:trixie-slim
+            command: |
+              apt-get update >/dev/null
+              apt-get install -y --no-install-recommends ca-certificates curl sudo >/dev/null
+              curl -fsSL https://grwlx.github.io/sshfling/install.sh -o /tmp/sshfling-install.sh
+              bash /tmp/sshfling-install.sh apt
+          - name: ubuntu-22.04
+            image: ubuntu:22.04
+            command: |
+              apt-get update >/dev/null
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl sudo >/dev/null
+              curl -fsSL https://grwlx.github.io/sshfling/install.sh -o /tmp/sshfling-install.sh
+              bash /tmp/sshfling-install.sh apt
+          - name: ubuntu-24.04
             image: ubuntu:24.04
             command: |
               apt-get update >/dev/null
@@ -87,6 +103,7 @@ jobs:
   linux-community-builds:
     name: Linux community runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: validate-version
     strategy:
       fail-fast: false
@@ -152,6 +169,7 @@ jobs:
   nix-flake:
     name: Nix flake runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -171,6 +189,7 @@ jobs:
   slackware-slackbuild:
     name: Slackware SlackBuild runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -230,6 +249,7 @@ jobs:
   freebsd-source-layout:
     name: FreeBSD source layout runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -256,6 +276,7 @@ jobs:
   openbsd-source-layout:
     name: OpenBSD source layout runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -287,6 +308,7 @@ jobs:
   netbsd-source-layout:
     name: NetBSD source layout runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -324,6 +346,7 @@ jobs:
   firewall-freebsd-family:
     name: Firewall OS FreeBSD runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: validate-version
     strategy:
       fail-fast: false
@@ -391,6 +414,7 @@ jobs:
   macos-pkg:
     name: macOS pkg runtime
     runs-on: macos-latest
+    timeout-minutes: 15
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -405,6 +429,7 @@ jobs:
   macos-homebrew:
     name: Homebrew formula runtime
     runs-on: macos-latest
+    timeout-minutes: 20
     needs: validate-version
     steps:
       - uses: actions/checkout@v5
@@ -470,6 +495,7 @@ jobs:
   community-manifest-sanity:
     name: Community manifest template sanity
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: validate-version
     steps:
       - uses: actions/checkout@v5

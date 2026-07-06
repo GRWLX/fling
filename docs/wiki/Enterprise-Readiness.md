@@ -9,13 +9,14 @@ release.
 | --- | --- | --- |
 | Versioning | Ready in repo | Use a three-component numeric version and a matching `vX.Y.Z` tag. |
 | Linux packages | Ready in repo | Validate `.deb`, `.rpm`, APT metadata, RPM metadata, and repository signing. |
-| macOS package | Build supported | Sign and notarize production `.pkg` artifacts outside the current repo workflow if required by policy. |
-| Windows MSI | Build supported | Authenticode-sign production MSI artifacts outside the current repo workflow if required by policy. |
+| macOS package | Build available | Sign and notarize production `.pkg` artifacts outside the current repo workflow if required by policy. |
+| Windows MSI | Build available | Authenticode-sign production MSI artifacts outside the current repo workflow if required by policy. |
 | Public package site | Ready in repo | Enable GitHub Pages from Actions and run the public-web workflow. |
 | Community manifests | Generated | Submit manually where ecosystem review or maintainer accounts are required. |
 | License signaling | Ready in repo | Confirm commercial license approval before redistribution. |
 | Release validation | Ready in repo | Run package install tests and cross-OS validation for each published version. |
-| Access behavior contract | Ready in repo | Confirm docs and release notes state password-by-default, explicit certificate mode, prune limits, and uninstall cleanup boundaries. |
+| Access behavior contract | Ready in repo | Confirm docs and release notes state password-by-default, explicit certificate mode, access-level classification limits, prune limits, and uninstall cleanup boundaries. |
+| Platform coverage evidence | Partial | Keep a compact evidence-backed declaration for OS versions, Python/OpenSSH versions, CPU architectures, hardware classes, ARM/IoT targets, and FPGA/SoC host control-plane scope. |
 | Compliance evidence | Partial | Use the release evidence packet for SOC 2, ISO 27001:2022, and NIST SP 800-53 Rev. 5 mapping; do not claim certification from repo evidence alone. |
 | Rollback | Operator-owned | Prefer a fixed forward release after external publication. Republish only before consumption or for package-site generation defects. |
 | Fleet policy | Operator-owned | Manage `/etc/sshfling/policy.json` and repository trust through configuration management. |
@@ -31,14 +32,18 @@ A release is ready to publish when all of the following are true:
   explicitly marked as a non-production test site.
 - GitHub Pages deployment from Actions is enabled.
 - License approval for the intended publication channels is recorded.
+- Advertised OS, language/runtime, CPU architecture, hardware class, ARM/IoT,
+  and FPGA/SoC host claims are backed by release evidence or an approved
+  exception.
 - The release operator knows whether Apple notarization and Authenticode signing
   are required for this release.
 - The support owner has reviewed install, uninstall, and cleanup instructions.
 - The user-facing docs and release notes match implemented access behavior:
   password mode is the default, certificate mode requires `--certificate`,
-  certificate-specific options fail without `--certificate`, `password prune`
+  certificate-specific options fail without `--certificate`, access levels are
+  policy classifications rather than privilege assignment, `password prune`
   only removes expired tracked password grants, and package uninstall does not
-  promise dependency-state rollback.
+  promise dependency-state rollback or original host-state restoration.
 
 Do not publish when:
 
@@ -49,10 +54,15 @@ Do not publish when:
 - The package site verifier fails.
 - The release requires undocumented manual install steps.
 - Docs or release notes describe certificate mode as the default access path.
+- Docs or release notes imply `--access-level` or `--role` grants sudo,
+  administrator, or root-equivalent privileges instead of classifying the target
+  account for policy review.
 - Docs or release notes imply `password prune --all` removes active grants or
   unmanaged users.
 - Docs or release notes imply package uninstall restores Python, OpenSSH,
   account-management tools, `procps`, or `util-linux` to preinstall state.
+- Package scripts store uninstall lifecycle state under a service-writable
+  directory or source shell state files as root.
 - The release claims SOC 2, ISO 27001, NIST, FedRAMP, or other compliance
   certification without a separately approved certification or attestation.
 
@@ -64,10 +74,12 @@ Treat these as enterprise no-go findings until fixed or formally excepted:
 | --- | --- |
 | Default access path is documented incorrectly | Operators may create or expect the wrong SSH auth material. |
 | Certificate setup is documented as implicit | The implementation requires `--certificate` and rejects certificate-only options without it. |
+| Access-level behavior is overstated | `access_level` is a policy classification and validation gate; host IAM, sudoers, PAM, AD, MDM, and service controls own actual privileges. |
 | Prune semantics are overstated | The implementation prunes expired tracked password grants only and preserves active, unmanaged, and existing-user cases. |
 | Uninstall dependency rollback is promised | Package managers and fleet policy own dependency state after uninstall. |
 | Unsigned or ephemeral-signed fleet repositories are promoted as production | Enterprise Linux clients need stable package trust. |
 | Required macOS notarization or Windows Authenticode signing is missing | Enterprise desktop distribution may fail platform policy. |
+| Broad OS, language, hardware, ARM, IoT, embedded, or FPGA support is claimed without evidence | Enterprise customers need exact supported and unsupported platform boundaries. |
 | Release evidence lacks approval, validation, signing, rollback, or exception records | SOC 2, ISO 27001, and NIST-aligned reviews need retained proof, not intent. |
 
 ## Enterprise Deployment Model
@@ -95,8 +107,36 @@ Each enterprise release should retain:
 - Checksums file URL.
 - Repository signing key fingerprint.
 - Cross-OS validation run URL.
+- Access-level policy classification for privileged or root-equivalent grant
+  paths, including host-control evidence for the actual privileges.
+- Platform coverage declaration with exact OS versions, Python/OpenSSH
+  versions, CPU architecture, hardware class, ARM/IoT/FPGA scope, evidence
+  links, and exception IDs.
 - Known exceptions, such as unsigned Apple or Windows artifacts when policy
   allows them.
+
+Generated release matrices, package trees, scan outputs, and raw platform
+evidence should remain in ignored release-evidence paths such as
+`docs/release/enterprise-release-evidence/` or in the controlled release ticket.
+Do not commit large generated platform matrices to the source tree.
+
+## Platform Coverage Expectations
+
+Treat platform support as an evidence-backed claim:
+
+- OS claims name exact versions and install paths, not just Linux, BSD, macOS,
+  Windows, or community package ecosystems.
+- Runtime claims include Python, OpenSSH client/server, shell or PowerShell,
+  and password-grant account-management tools where relevant.
+- CPU architecture claims identify `x86_64`/`amd64`, `arm64`/`aarch64`, and
+  any 32-bit, `s390x`, `ppc64le`, or `riscv64` status as validated,
+  customer-validated, deferred, or unsupported.
+- ARM and IoT claims state whether the release was tested as client-only,
+  certificate-server, or password-server mode and whether persistent storage,
+  clock, service-manager, and host-user tooling assumptions were met.
+- FPGA and SoC claims apply only to the host CPU/OS control plane running
+  Python and OpenSSH unless separate evidence covers FPGA fabric, bitstream,
+  accelerator, board support package, or vendor toolchain behavior.
 
 ## Documentation Requirements
 
@@ -105,8 +145,14 @@ Before release, verify that these docs still match behavior:
 - [README](../../README.md) for quick start, production usage, uninstall, and
   cleanup.
 - [Repository Registration](../repos.md) for package manager commands.
-- [Build Targets](../build-targets.md) for supported artifacts and validation
+- [Build Targets](../build-targets.md) for the artifact matrix and validation
   scope.
+- [OpenSSH Dependency Policy](../openssh-dependencies.md) for OpenSSH, Python,
+  package dependency, uninstall, and original-state ownership.
+- [Compliance Mapping](../compliance-mapping.md) for framework crosswalks,
+  CIS-style hardening expectations, caveats, and evidence sources.
+- [SSHFling Threat Model](../threat-model.md) for residual risks, assumptions,
+  and release/access abuse paths.
 - [Operations Runbook](Operations-Runbook.md) for release and incident
   handling.
 - [Security and Compliance](Security-and-Compliance.md) for signing, audit, and
@@ -120,11 +166,14 @@ For enterprise hosts:
 - Store the repository public key through configuration management.
 - Manage `/etc/sshfling/policy.json` through signed packages or configuration
   management.
+- Use `access_level` only as a least-privilege classification and validation
+  field. It does not add the account to sudoers, local administrators, groups,
+  roles, or IAM bindings.
 - Alert on unexpected package changes, repository key changes, and policy file
   changes.
 - Password grants are the default server-access path. Use certificate mode
   explicitly when fleet policy forbids temporary local passwords, when the
-  target platform is not a supported Linux password host, or when certificate
+  target platform is not a validated Linux password host, or when certificate
   custody and CA operations are already managed.
 - Keep `/etc/sshfling` root-owned and expose secrets only through the minimum
   group read access needed by the issuer service.
@@ -136,8 +185,12 @@ Support is ready when operators can answer:
 - Which package version is installed?
 - Which repository or installer installed it?
 - Which policy file is active?
+- Which access level is effective, and which host controls enforce the actual
+  Unix, Windows, sudo, PAM, AD, MDM, or service privileges?
 - Which issuer service token and CA key path are configured?
 - Which workflows validated the release?
+- Which platform coverage evidence supports the OS, runtime, CPU, hardware,
+  ARM/IoT, or FPGA/SoC claim?
 - Which uninstall path applies to the host?
 - Which cleanup steps are required for host SSH configuration, temporary
   password grants, and local CA material?

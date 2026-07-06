@@ -1,0 +1,588 @@
+# SSHFling Install and Uninstall Runbook
+
+This runbook gives explicit install and uninstall commands by operating system
+and package channel. Replace `OWNER`, `REPO`, and `VERSION` with the release
+owner, repository name, and package version from the approved release record.
+
+```bash
+BASE_URL="https://OWNER.github.io/REPO"
+VERSION="0.1.12"
+```
+
+SSHFling is proprietary commercial software. Installing, running,
+redistributing, or submitting generated manifests to third-party repositories
+requires the rights described in the project LICENSE or a separate written
+agreement from GRWLX.
+
+## Enterprise Rules
+
+- Verify the approved release checksums before installing raw package files.
+- For APT and RPM repositories, verify the approved repository signing key
+  fingerprint before adding the repo to a managed host.
+- Package uninstall removes SSHFling-managed package files for the selected
+  install channel. It is not a host-state rollback.
+- Package uninstall does not remove `/etc/sshfling`, local CA material, host
+  SSH configuration created by `sshfling host install`, temporary password grant
+  state, audit records, Python, OpenSSH, account-management tools, `procps`, or
+  `util-linux`.
+- Do not run dependency cleanup commands such as `apt autoremove`,
+  `apt autopurge`, `dnf autoremove`, or `yum autoremove` as part of SSHFling
+  package removal unless that cleanup is separately approved by fleet policy.
+- If exact revert is required, record the original package inventory, dependency
+  marks, repository state, host SSH configuration, service accounts, PATH, MDM
+  inventory, and backups before deployment.
+
+Optional host-state cleanup before package removal:
+
+```bash
+sudo sshfling shutdown || true
+sudo sshfling password prune
+sudo sshfling host uninstall --username temp-remote --dry-run
+sudo sshfling host uninstall --username temp-remote --reload
+sudo systemctl disable --now sshflingd 2>/dev/null || true
+```
+
+Use `sshfling host uninstall --delete-user` only for Unix accounts created
+solely for SSHFling. Shared CA, wrapper, policy-user, and account removal are
+opt-in host cleanup actions, not package uninstall side effects.
+
+## Linux DEB Package
+
+Use this path for a local `.deb` artifact or a package downloaded from the
+public package site.
+
+Install from a local build output:
+
+```bash
+sudo apt install ./dist/sshfling_${VERSION}_all.deb
+sshfling --version
+```
+
+Install a raw `.deb` from the public package site with checksum verification:
+
+```bash
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/apt/sshfling_${VERSION}_all.deb" -o "$tmp/sshfling_${VERSION}_all.deb"
+curl -fsSL "${BASE_URL}/apt/SHA256SUMS" -o "$tmp/SHA256SUMS"
+grep "  sshfling_${VERSION}_all.deb$" "$tmp/SHA256SUMS" > "$tmp/sshfling.SHA256SUMS"
+(cd "$tmp" && sha256sum -c sshfling.SHA256SUMS)
+sudo apt install "$tmp/sshfling_${VERSION}_all.deb"
+sshfling --version
+```
+
+Uninstall the DEB package without dependency cleanup:
+
+```bash
+sudo apt remove -y sshfling
+```
+
+Use `apt purge sshfling` only when a reviewed fleet runbook intentionally
+removes SSHFling conffiles such as `/etc/sshfling/policy.json` or
+`/etc/sshfling/sshflingd.env`. Purge still does not remove OpenSSH, Python, host
+SSH configuration, temporary grant state, or CA material.
+
+DEB maintainer scripts record only SSHFling package-created service account
+state under root-owned `/var/lib/sshfling/package-state`. Purge removes that
+package state and removes the package-created `sshflingd` user/group only when
+the record says they did not preexist and no SSHFling config/state directory
+remains.
+
+## Linux RPM Package
+
+Use this path for a local `.rpm` artifact or a package downloaded from the
+public package site.
+
+Install from a local build output:
+
+```bash
+sudo dnf install ./dist/sshfling-${VERSION}-1.noarch.rpm
+sshfling --version
+```
+
+Use `yum localinstall` on older yum-only hosts:
+
+```bash
+sudo yum localinstall ./dist/sshfling-${VERSION}-1.noarch.rpm
+```
+
+Install a raw `.rpm` from the public package site with checksum verification:
+
+```bash
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/rpm/sshfling-${VERSION}-1.noarch.rpm" -o "$tmp/sshfling-${VERSION}-1.noarch.rpm"
+curl -fsSL "${BASE_URL}/rpm/SHA256SUMS" -o "$tmp/SHA256SUMS"
+grep "  sshfling-${VERSION}-1.noarch.rpm$" "$tmp/SHA256SUMS" > "$tmp/sshfling.SHA256SUMS"
+(cd "$tmp" && sha256sum -c sshfling.SHA256SUMS)
+sudo dnf install "$tmp/sshfling-${VERSION}-1.noarch.rpm"
+sshfling --version
+```
+
+Uninstall the RPM package without dependency cleanup:
+
+```bash
+sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
+```
+
+Use this on older yum-only hosts:
+
+```bash
+sudo yum remove -y sshfling
+```
+
+RPM scriptlets use root-owned `/var/lib/sshfling/package-state` for install
+state and `/var/lib/sshfling/rpm-preserve-config` only as a transient erase
+scratch area. They do not read lifecycle state from the service-owned
+`/var/lib/sshflingd` tree.
+
+## Public APT Repository
+
+Use this path for Debian and Ubuntu fleet installs from the published Pages
+package site.
+
+Install:
+
+```bash
+APPROVED_REPO_FINGERPRINT="PASTE_APPROVED_RELEASE_FINGERPRINT"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/sshfling-repo.gpg" -o "$tmp/sshfling-repo.gpg"
+actual_fingerprint="$(gpg --batch --show-keys --with-colons "$tmp/sshfling-repo.gpg" | awk -F: '/^fpr:/ {print toupper($10); exit}')"
+test "$actual_fingerprint" = "$APPROVED_REPO_FINGERPRINT"
+sudo install -d -m 0755 /usr/share/keyrings
+sudo install -m 0644 "$tmp/sshfling-repo.gpg" /usr/share/keyrings/sshfling-repo.gpg
+echo "deb [signed-by=/usr/share/keyrings/sshfling-repo.gpg] ${BASE_URL}/apt ./" | sudo tee /etc/apt/sources.list.d/sshfling.list
+sudo apt update
+sudo apt install -y sshfling
+sshfling --version
+```
+
+Uninstall and unregister the APT repository:
+
+```bash
+sudo apt remove -y sshfling
+sudo rm -f \
+  /etc/apt/sources.list.d/sshfling.list \
+  /etc/apt/preferences.d/sshfling \
+  /usr/share/keyrings/sshfling-repo.gpg
+sudo apt update
+```
+
+## Public RPM Repository
+
+Use this path for RHEL, Fedora, Rocky Linux, and AlmaLinux fleet installs from
+the published Pages package site.
+
+Install:
+
+```bash
+APPROVED_REPO_FINGERPRINT="PASTE_APPROVED_RELEASE_FINGERPRINT"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/sshfling-repo.asc" -o "$tmp/sshfling-repo.asc"
+actual_fingerprint="$(gpg --batch --show-keys --with-colons "$tmp/sshfling-repo.asc" | awk -F: '/^fpr:/ {print toupper($10); exit}')"
+test "$actual_fingerprint" = "$APPROVED_REPO_FINGERPRINT"
+sudo install -d -m 0755 /etc/pki/rpm-gpg
+sudo install -m 0644 "$tmp/sshfling-repo.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+sudo tee /etc/yum.repos.d/sshfling.repo >/dev/null <<EOF
+[sshfling]
+name=SSHFling
+baseurl=${BASE_URL}/rpm
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+EOF
+sudo dnf install -y sshfling
+sshfling --version
+```
+
+Use `sudo yum install -y sshfling` on older yum-only hosts.
+
+Uninstall and unregister the RPM repository:
+
+```bash
+sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+```
+
+Use this on older yum-only hosts:
+
+```bash
+sudo yum remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+```
+
+## Public Installer Wrapper
+
+The generated `install.sh` wrapper is a convenience path for interactive hosts.
+Use the signed APT and RPM repo commands above as the production trust anchor
+for managed Linux fleets.
+
+Install with auto-detection:
+
+```bash
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/install.sh" -o "$tmp/install.sh"
+bash "$tmp/install.sh" install auto
+```
+
+Install with an explicit channel:
+
+```bash
+bash "$tmp/install.sh" install apt
+bash "$tmp/install.sh" install dnf
+bash "$tmp/install.sh" install brew
+```
+
+Uninstall with an explicit channel:
+
+```bash
+bash "$tmp/install.sh" uninstall apt
+bash "$tmp/install.sh" uninstall dnf
+bash "$tmp/install.sh" uninstall brew
+```
+
+For fleet uninstall, prefer the direct package-manager commands in the
+platform-specific sections so removal does not depend on downloading a mutable
+helper script at uninstall time.
+
+## macOS Homebrew
+
+Install from the generated public formula:
+
+```bash
+brew install "${BASE_URL}/homebrew/sshfling.rb"
+sshfling --version
+```
+
+Uninstall:
+
+```bash
+brew uninstall sshfling
+```
+
+Homebrew uninstall removes the formula's SSHFling files. It does not restore
+host Python or OpenSSH to an earlier state.
+
+## macOS pkg
+
+Install with the generated checksum-verifying helper:
+
+```bash
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/macos/install-pkg.sh" -o "$tmp/install-pkg.sh"
+sudo bash "$tmp/install-pkg.sh"
+sshfling --version
+```
+
+Install a downloaded `.pkg` directly:
+
+```bash
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "${BASE_URL}/downloads/sshfling-${VERSION}.pkg" -o "$tmp/sshfling-${VERSION}.pkg"
+curl -fsSL "${BASE_URL}/downloads/SHA256SUMS" -o "$tmp/SHA256SUMS"
+grep "  sshfling-${VERSION}.pkg$" "$tmp/SHA256SUMS" > "$tmp/sshfling.SHA256SUMS"
+(cd "$tmp" && shasum -a 256 -c sshfling.SHA256SUMS)
+sudo installer -pkg "$tmp/sshfling-${VERSION}.pkg" -target /
+```
+
+Uninstall:
+
+```bash
+sudo rm -f /usr/local/bin/sshfling
+sudo rm -rf /usr/local/share/sshfling
+sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&1 || true
+```
+
+The pkg installs `/usr/local/bin/sshfling`, `/usr/local/share/sshfling`, and a
+default `/etc/sshfling/policy.json`. Uninstall intentionally preserves
+`/etc/sshfling` for policy, CA material, and operator-managed configuration.
+The pkg does not bundle Python or OpenSSH.
+
+## Windows MSI
+
+Install with the generated checksum-verifying helper from an elevated
+PowerShell session:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+$Installer = Join-Path $env:TEMP "sshfling-install.ps1"
+Invoke-WebRequest -Uri "$BaseUrl/windows/install.ps1" -OutFile $Installer
+& $Installer
+sshfling --version
+```
+
+Install a downloaded MSI directly:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+$Version = "0.1.12"
+$Msi = Join-Path $env:TEMP "sshfling-$Version.msi"
+$Sums = Join-Path $env:TEMP "sshfling-SHA256SUMS"
+Invoke-WebRequest -Uri "$BaseUrl/downloads/sshfling-$Version.msi" -OutFile $Msi
+Invoke-WebRequest -Uri "$BaseUrl/downloads/SHA256SUMS" -OutFile $Sums
+$ExpectedLine = Get-Content $Sums | Where-Object { $_ -like "* sshfling-$Version.msi" } | Select-Object -First 1
+if (-not $ExpectedLine) { throw "Checksum entry not found for sshfling-$Version.msi" }
+$Expected = $ExpectedLine.Split()[0].ToLowerInvariant()
+$Actual = (Get-FileHash -Algorithm SHA256 -Path $Msi).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw "SHA-256 mismatch for sshfling-$Version.msi" }
+Start-Process msiexec.exe -Wait -ArgumentList "/i", $Msi, "/qn", "/norestart"
+```
+
+Uninstall with the generated helper:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+$Uninstaller = Join-Path $env:TEMP "sshfling-uninstall.ps1"
+Invoke-WebRequest -Uri "$BaseUrl/windows/uninstall.ps1" -OutFile $Uninstaller
+& $Uninstaller
+```
+
+Uninstall by MSI product registration:
+
+```powershell
+$UninstallRoots = @(
+  "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+$Products = Get-ItemProperty -Path $UninstallRoots -ErrorAction SilentlyContinue |
+  Where-Object { $_.DisplayName -eq "SSHFling" }
+foreach ($Product in $Products) {
+  $ProductCode = $Product.PSChildName
+  if ($ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {
+    throw "Could not determine MSI product code for SSHFling."
+  }
+  Start-Process msiexec.exe -Wait -ArgumentList "/x", $ProductCode, "/qn", "/norestart"
+}
+```
+
+MSI uninstall removes the installed SSHFling product directory and the machine
+PATH entry added by the MSI. It does not remove Python, OpenSSH, Windows
+OpenSSH Server, host SSH configuration, temporary grant state, CA material, or
+configuration stored outside the install directory.
+
+## Windows Portable Zip
+
+Install for the current user:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+$Version = "0.1.12"
+$InstallDir = Join-Path $env:LOCALAPPDATA "Programs\SSHFling"
+$Zip = Join-Path $env:TEMP "sshfling-$Version-windows.zip"
+$Sums = Join-Path $env:TEMP "sshfling-SHA256SUMS"
+Invoke-WebRequest -Uri "$BaseUrl/downloads/sshfling-$Version-windows.zip" -OutFile $Zip
+Invoke-WebRequest -Uri "$BaseUrl/downloads/SHA256SUMS" -OutFile $Sums
+$ExpectedLine = Get-Content $Sums | Where-Object { $_ -like "* sshfling-$Version-windows.zip" } | Select-Object -First 1
+if (-not $ExpectedLine) { throw "Checksum entry not found for sshfling-$Version-windows.zip" }
+$Expected = $ExpectedLine.Split()[0].ToLowerInvariant()
+$Actual = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw "SHA-256 mismatch for sshfling-$Version-windows.zip" }
+Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+Expand-Archive -Path $Zip -DestinationPath $InstallDir
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$PathParts = @(($UserPath -split ';') | Where-Object { $_ })
+if ($PathParts -notcontains $InstallDir) {
+  $NewPath = ($PathParts + $InstallDir) -join ';'
+  [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+}
+```
+
+Open a new PowerShell session, then verify:
+
+```powershell
+sshfling --version
+```
+
+Uninstall the portable zip install and remove only the PATH entry that this
+deployment added:
+
+```powershell
+$InstallDir = Join-Path $env:LOCALAPPDATA "Programs\SSHFling"
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$NewPath = (($UserPath -split ';') | Where-Object { $_ -and ($_ -ne $InstallDir) }) -join ';'
+[Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
+```
+
+The portable zip does not create an MSI product registration. Uninstall is file
+and PATH cleanup only.
+
+## Windows winget
+
+The generated winget manifests are published under
+`${BASE_URL}/winget/manifests/g/OWNER/SSHFling/VERSION/`. Official winget use
+requires submission to, and acceptance by, the winget package repository.
+
+Install after the manifest is accepted:
+
+```powershell
+winget install OWNER.SSHFling
+```
+
+Uninstall:
+
+```powershell
+winget uninstall OWNER.SSHFling
+```
+
+For release validation from a local checkout of the generated manifest tree:
+
+```powershell
+winget install --manifest .\winget\manifests\g\OWNER\SSHFling\VERSION
+winget uninstall OWNER.SSHFling
+```
+
+winget uses the generated MSI manifest, so MSI dependency and uninstall scope
+still applies.
+
+## Windows Scoop
+
+Install directly from the generated Scoop manifest:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+scoop install "$BaseUrl/scoop/sshfling.json"
+sshfling --version
+```
+
+Uninstall:
+
+```powershell
+scoop uninstall sshfling
+```
+
+Scoop uses the Windows portable zip. Remove any custom PATH entries or shims
+created outside Scoop separately.
+
+## Windows Chocolatey
+
+Install with the generated checksum-verifying helper from an elevated
+PowerShell session:
+
+```powershell
+$BaseUrl = "https://OWNER.github.io/REPO"
+$ChocoInstaller = Join-Path $env:TEMP "sshfling-chocolatey-install.ps1"
+Invoke-WebRequest -Uri "$BaseUrl/chocolatey/install.ps1" -OutFile $ChocoInstaller
+& $ChocoInstaller
+sshfling --version
+```
+
+Install after the package is accepted into an approved Chocolatey source:
+
+```powershell
+choco install sshfling -y
+```
+
+Uninstall:
+
+```powershell
+choco uninstall sshfling -y
+```
+
+Chocolatey uses the generated MSI package, so MSI dependency and uninstall
+scope still applies.
+
+## BSD and Community Manifests
+
+Generated community manifests are published at `${BASE_URL}/community.html`.
+Some can be used directly. Official or community repositories still require the
+normal maintainer account, review, signing, and submission process.
+
+| Ecosystem | Install command after manifest import or approval | Uninstall command |
+| --- | --- | --- |
+| Arch / AUR | `curl -fsSLO "${BASE_URL}/arch/PKGBUILD" && makepkg -si` | `sudo pacman -Rns sshfling` |
+| Alpine | `abuild -r` from the generated `APKBUILD`, then `sudo apk add path/to/sshfling-${VERSION}-r0.apk` | `sudo apk del sshfling` |
+| FreeBSD Ports | `cd /usr/ports/security/sshfling && sudo make install clean` | `sudo pkg delete sshfling` |
+| OpenBSD Ports | `cd /usr/ports/security/sshfling && doas make install` | `doas pkg_delete sshfling` |
+| pkgsrc for NetBSD, DragonFly BSD, illumos, SmartOS | `cd /usr/pkgsrc/security/sshfling && sudo bmake install clean` | `sudo pkg_delete sshfling` |
+| Nix / NixOS | `NIXPKGS_ALLOW_UNFREE=1 nix profile install --impure ./nix` | `nix profile remove sshfling` |
+| Guix | `guix package -f guix/sshfling.scm` | `guix remove sshfling` |
+| Void Linux | `./xbps-src pkg sshfling` then `sudo xbps-install --repository hostdir/binpkgs sshfling` | `sudo xbps-remove sshfling` |
+| Gentoo | `sudo emerge --ask app-admin/sshfling` | `sudo emerge --depclean app-admin/sshfling` |
+| Slackware | `sudo sh slackware/sshfling.SlackBuild` then `sudo installpkg /tmp/sshfling-${VERSION}-*.txz` | `sudo removepkg sshfling` |
+| openSUSE / OBS | `sudo zypper install sshfling` after OBS publication | `sudo zypper remove sshfling` |
+| Snapcraft | `snapcraft` then `sudo snap install ./sshfling_*.snap --dangerous` | `sudo snap remove sshfling` |
+| Termux | `pkg install ./sshfling_${VERSION}_*.deb` after building the Termux package | `pkg uninstall sshfling` |
+| AppImage | `appimage-builder --recipe appimage/AppImageBuilder.yml`, then copy the AppImage to an approved location and add a launcher if needed | Remove the AppImage file and launcher |
+
+BSD and community package-manager uninstalls follow the owning package manager's
+normal file-removal behavior. They do not imply rollback of OpenSSH, Python,
+base-system SSH configuration, package indexes, or profile/store generations
+unless the local package manager and fleet policy explicitly manage that
+rollback.
+
+## Containers
+
+Containers are a test harness and packaged runtime path. They are not the normal
+production host grant path, and they do not change the host's OpenSSH packages.
+
+Build and run the local Docker Compose harness:
+
+```bash
+./scripts/install-local.sh
+sshfling init ./my-sshfling --with-key --session-seconds 60
+cd ./my-sshfling
+sshfling network create
+sshfling server up --build
+sshfling client run 'whoami && hostname && date -u'
+```
+
+Stop and remove the Compose harness from the generated project directory:
+
+```bash
+sshfling server down
+docker compose -f compose.client.yml down --remove-orphans
+docker network rm timed-ssh-net 2>/dev/null || true
+docker image rm timed-ssh-server:latest timed-ssh-client:latest 2>/dev/null || true
+```
+
+Remove a local source checkout install, if used:
+
+```bash
+./scripts/uninstall-local.sh
+```
+
+Published container images, when enabled, use GitHub Container Registry names:
+
+```bash
+docker pull ghcr.io/OWNER/sshfling-client:VERSION
+docker pull ghcr.io/OWNER/sshfling-server:VERSION
+```
+
+Remove pulled images:
+
+```bash
+docker image rm ghcr.io/OWNER/sshfling-client:VERSION ghcr.io/OWNER/sshfling-server:VERSION
+```
+
+Container cleanup removes selected containers, images, networks, and volumes
+only. Exact dependency rollback inside a container requires recording the image
+digest, Dockerfile, package index state, and build inputs used for that image.
+
+## Original-State Caveats
+
+SSHFling packages declare runtime capabilities where each ecosystem supports
+dependency metadata, but the dependency versions are resolved by the target
+operating system, package manager channel, container base image, MDM/Intune
+policy, or fleet configuration.
+
+Record this evidence before enterprise deployment when exact restoration matters:
+
+| Environment | Evidence to keep outside SSHFling |
+| --- | --- |
+| Linux | Package inventory, manual/auto dependency marks, repository configuration, `/etc/ssh` and `/etc/sshfling` baselines, service-account inventory, and configuration-management state. |
+| macOS | MDM inventory, package receipts, Homebrew bundle or fleet policy, `/etc/ssh` and `/etc/sshfling` baselines, and backup records. |
+| Windows | Intune/SCCM/Group Policy app inventory, Python inventory, Windows OpenSSH capability state, MSI product inventory, machine/user PATH baseline, and backup records. |
+| BSD | `pkg`/ports/pkgsrc inventory, `/etc` and localbase configuration baselines, and backup or configuration-management records. |
+| Containers | Image digest, Dockerfile or build recipe, package index state, runtime volume list, and compose or orchestrator configuration. |
+| Nix / Guix | Flake/channel or Guix revision, profile generation, store path, and garbage-collection policy. |
+
+Treat dependency cleanup as a separate fleet change with its own owner, review,
+evidence, rollback plan, and release-ticket approval.

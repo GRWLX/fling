@@ -160,8 +160,25 @@ test_deb_image() {
   docker cp "dist/sshfling_${version}_all.deb" "$name:/tmp/sshfling.deb"
   docker exec "$name" sh -lc "set -eu
     apt-get update >/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/sshfling.deb >/dev/null
-    sh /tmp/validate-cli.sh sshfling '$version'"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold /tmp/sshfling.deb >/dev/null
+    sshfling --version | grep -Fx 'sshfling $version'
+    test -f /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshflingd/package-state/install-state
+    test \"\$(stat -c '%u:%g' /var/lib/sshfling/package-state)\" = '0:0'
+    test \"\$(stat -c '%a' /var/lib/sshfling/package-state)\" = '700'
+    printf '%s\n' '{\"version\":2,\"default\":{\"max_time_seconds\":123,\"max_connections\":1,\"access_level\":\"standard\"}}' >/etc/sshfling/policy.json
+    DEBIAN_FRONTEND=noninteractive apt-get remove -y sshfling >/dev/null
+    if [ -e /usr/bin/sshfling ]; then
+      echo 'sshfling command survived deb package removal' >&2
+      exit 1
+    fi
+    grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold /tmp/sshfling.deb >/dev/null
+    grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
+    sh /tmp/validate-cli.sh sshfling '$version'
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y sshfling >/dev/null
+    test ! -e /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshflingd/package-state/install-state"
 }
 
 test_rpm_image() {
@@ -173,10 +190,27 @@ test_rpm_image() {
   docker cp "dist/sshfling-${version}-1.noarch.rpm" "$name:/tmp/sshfling.rpm"
   docker exec "$name" sh -lc "set -eu
     if command -v dnf >/dev/null 2>&1; then
-      dnf install -y /tmp/sshfling.rpm >/dev/null
+      package_install='dnf install -y /tmp/sshfling.rpm'
     else
-      yum install -y /tmp/sshfling.rpm >/dev/null
+      package_install='yum install -y /tmp/sshfling.rpm'
     fi
+    \$package_install >/dev/null
+    sshfling --version | grep -Fx 'sshfling $version'
+    test -f /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshflingd/package-state/install-state
+    test \"\$(stat -c '%u:%g' /var/lib/sshfling/package-state)\" = '0:0'
+    test \"\$(stat -c '%a' /var/lib/sshfling/package-state)\" = '700'
+    printf '%s\n' '{\"version\":2,\"default\":{\"max_time_seconds\":123,\"max_connections\":1,\"access_level\":\"standard\"}}' >/etc/sshfling/policy.json
+    rpm -e sshfling >/dev/null
+    if [ -e /usr/bin/sshfling ]; then
+      echo 'sshfling command survived rpm package removal' >&2
+      exit 1
+    fi
+    test ! -e /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshfling/rpm-preserve-config
+    grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
+    \$package_install >/dev/null
+    grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
     sh /tmp/validate-cli.sh sshfling '$version'"
 }
 

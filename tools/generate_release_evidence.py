@@ -14,6 +14,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -49,6 +50,7 @@ MATRIX_FIELDS = [
     "reviewed_at_utc",
     "notes",
 ]
+GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 
 
 def utc_now() -> str:
@@ -89,7 +91,40 @@ def repo_relative(path: Path, repo_root: Path) -> str:
         raise SystemExit(f"release evidence path must stay inside repo: {path}") from exc
 
 
+def require_repo_path(path: Path, repo_root: Path, label: str) -> Path:
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(repo_root.resolve())
+    except ValueError as exc:
+        raise SystemExit(f"{label} must stay inside repo: {path}") from exc
+    return resolved
+
+
+def require_path_token(name: str, value: str) -> None:
+    if not value:
+        raise SystemExit(f"{name} is required")
+    if any(marker in value for marker in ("/", "\\", "\x00")):
+        raise SystemExit(f"{name} must not contain path separators")
+
+
+def require_owner_token(owner: str) -> None:
+    require_path_token("owner", owner)
+    if not GITHUB_OWNER_RE.fullmatch(owner):
+        raise SystemExit("owner must be a valid GitHub account or organization name")
+
+
+def reject_symlink_component(root: Path, rel_path: str, label: str) -> None:
+    current = root
+    for part in Path(rel_path).parts:
+        if part in {"", "."}:
+            continue
+        current = current / part
+        if current.is_symlink():
+            raise SystemExit(f"{label} path must not use symlinks: {rel_path}")
+
+
 def require_under_root(root: Path, rel_path: str) -> Path:
+    reject_symlink_component(root, rel_path, "required artifact")
     path = (root / rel_path).resolve()
     try:
         path.relative_to(root.resolve())
@@ -111,7 +146,14 @@ def require_files(root: Path, rel_paths: list[str], label: str) -> None:
 def collect_files(root: Path) -> list[Path]:
     if not root.is_dir():
         raise SystemExit(f"artifact directory not found: {root}")
-    return sorted(path for path in root.rglob("*") if path.is_file())
+    files: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        rel_path = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            raise SystemExit(f"artifact path must not be a symlink: {rel_path}")
+        if path.is_file():
+            files.append(path)
+    return files
 
 
 def release_asset_requirements(version: str) -> list[str]:
@@ -219,7 +261,10 @@ def artifact_records(root: Path, files: list[Path], repo_root: Path) -> list[dic
     records: list[dict[str, Any]] = []
     root_resolved = root.resolve()
     for index, path in enumerate(files, 1):
-        rel_to_root = path.resolve().relative_to(root_resolved).as_posix()
+        try:
+            rel_to_root = path.resolve().relative_to(root_resolved).as_posix()
+        except ValueError as exc:
+            raise SystemExit(f"artifact path escapes artifact root: {path}") from exc
         stat = path.stat()
         records.append(
             {
@@ -314,8 +359,8 @@ def write_matrix(path: Path, rows: list[dict[str, str]]) -> None:
 
 def generate(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
-    output_dir = (repo_root / args.output_dir).resolve()
-    repo_relative(output_dir, repo_root)
+    require_path_token("version", args.version)
+    output_dir = require_repo_path(repo_root / args.output_dir, repo_root, "output directory")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     source_commit = args.source_commit or os.environ.get("GITHUB_SHA") or current_commit(repo_root)
@@ -326,13 +371,15 @@ def generate(args: argparse.Namespace) -> int:
     owner = detect_owner(args.owner)
     if args.mode == "package-site" and not owner:
         raise SystemExit("package-site evidence requires --owner, OWNER, GITHUB_REPOSITORY_OWNER, or REPOSITORY")
+    if args.mode == "package-site":
+        require_owner_token(owner)
 
     if args.mode == "release-assets":
-        artifact_root = Path(args.artifacts_dir).resolve()
+        artifact_root = require_repo_path(repo_root / args.artifacts_dir, repo_root, "artifact directory")
         required = release_asset_requirements(args.version)
         signer_fingerprint = "NOT_APPLICABLE"
     else:
-        artifact_root = Path(args.public_dir).resolve()
+        artifact_root = require_repo_path(repo_root / args.public_dir, repo_root, "public directory")
         required = package_site_requirements(args.version, owner, require_repo_signatures, artifact_root)
         signer_fingerprint = fingerprint_from_site(artifact_root)
 

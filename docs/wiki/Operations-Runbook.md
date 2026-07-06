@@ -28,9 +28,10 @@ This runbook covers package release operations for SSHFling.
 
 4. Confirm release notes and docs match the implemented access contract:
    password access is the default, certificate access requires
-   `--certificate`, `password prune` only removes expired tracked password
-   grants, and package uninstall does not remove `/etc/sshfling` configuration
-   or promise dependency-state rollback.
+   `--certificate`, access levels are classifications rather than privilege
+   grants, `password prune` only removes expired tracked password grants, and
+   package uninstall does not remove `/etc/sshfling` configuration or promise
+   dependency-state rollback.
 5. Confirm repository signing secrets are configured for production publishing.
 6. Confirm GitHub Pages is configured for Actions.
    Optional manual `Release packages with public web` runs are dry-run
@@ -57,7 +58,9 @@ This runbook covers package release operations for SSHFling.
    - `Cross OS validation`
 
 11. Record the workflow URLs, tag, commit SHA, package-site URL, checksums URL,
-   and signing key fingerprint in the release ticket.
+   signing key fingerprint, compliance mapping status, threat-model review,
+   OpenSSH dependency-policy review, and platform coverage evidence in the
+   release ticket.
 
 ## Post-Publish Smoke Checks
 
@@ -127,8 +130,9 @@ If the docs or release notes conflict with implemented access behavior:
 
 - Treat the release as blocked for enterprise publication.
 - Fix the docs before publishing when they misstate password default access,
-  explicit certificate mode, prune cleanup limits, host uninstall flags, or
-  package dependency-state limits.
+  explicit certificate mode, access-level classification, prune cleanup limits,
+  host uninstall flags, OpenSSH dependency ownership, or package
+  dependency-state limits.
 - If a behavior change is intentional, record it as a breaking change and add a
   migration note before tagging.
 

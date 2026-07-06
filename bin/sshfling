@@ -36,6 +36,36 @@ DEFAULT_DETACHED_DIR = ".sshfling/detached"
 MAX_TIME_SECONDS = 86400
 MAX_CONNECTIONS = 10
 MAX_DETACHED_JOBS = 10
+DEFAULT_ACCESS_LEVEL = "standard"
+ACCESS_LEVEL_ORDER = {
+    "standard": 0,
+    "operator": 1,
+    "sudo-limited": 2,
+    "admin": 3,
+}
+ACCESS_LEVEL_ALIASES = {
+    "standard": "standard",
+    "standard-user": "standard",
+    "user": "standard",
+    "operator": "operator",
+    "ops": "operator",
+    "sudo": "sudo-limited",
+    "sudo-limited": "sudo-limited",
+    "sudo-limited-user": "sudo-limited",
+    "limited-sudo": "sudo-limited",
+    "admin": "admin",
+    "administrator": "admin",
+    "root": "admin",
+    "root-equivalent": "admin",
+    "admin/root-equivalent": "admin",
+}
+ACCESS_LEVEL_DESCRIPTIONS = {
+    "standard": "Non-privileged account; no sudo/root-equivalent rights expected.",
+    "operator": "Operational account for diagnostics or approved service actions; not broad sudo.",
+    "sudo-limited": "Account with a reviewed sudoers allowlist or equivalent constrained elevation.",
+    "admin": "Root-equivalent or local administrator access; use only for approved break-glass work.",
+}
+ROOT_EQUIVALENT_USERS = {"root", "administrator"}
 FORCED_SESSION_WRAPPER = "sshfling-session"
 FORCED_SESSION_ALLOW_DETACHED_ARG = "--allow-detached-start"
 MIN_BEARER_TOKEN_LENGTH = 32
@@ -638,7 +668,11 @@ def default_ca_key_path():
 def default_policy():
     return {
         "version": 2,
-        "default": {"max_time_seconds": MAX_TIME_SECONDS, "max_connections": MAX_CONNECTIONS},
+        "default": {
+            "max_time_seconds": MAX_TIME_SECONDS,
+            "max_connections": MAX_CONNECTIONS,
+            "access_level": DEFAULT_ACCESS_LEVEL,
+        },
         "users": {},
     }
 
@@ -667,7 +701,70 @@ def duration_input_value(seconds):
     return f"{seconds}s"
 
 
-def validate_policy_values(max_time_seconds, max_connections):
+def normalize_access_level(value, default=DEFAULT_ACCESS_LEVEL):
+    if value is None or str(value).strip() == "":
+        value = default
+    token = str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    normalized = ACCESS_LEVEL_ALIASES.get(token)
+    if not normalized:
+        allowed = ", ".join(ACCESS_LEVEL_ORDER)
+        raise SSHFlingError(f"Invalid access level {value!r}. Use one of: {allowed}.", 2, access_level=value)
+    return normalized
+
+
+def access_level_catalog():
+    return {
+        name: {
+            "rank": ACCESS_LEVEL_ORDER[name],
+            "description": ACCESS_LEVEL_DESCRIPTIONS[name],
+            "root_equivalent": name == "admin",
+        }
+        for name in ACCESS_LEVEL_ORDER
+    }
+
+
+def implied_access_level_for_username(username):
+    if not username:
+        return None
+    if str(username).strip().lower() in ROOT_EQUIVALENT_USERS:
+        return "admin"
+    return None
+
+
+def validate_access_level_for_username(username, access_level):
+    normalized = normalize_access_level(access_level)
+    required = implied_access_level_for_username(username)
+    if required and ACCESS_LEVEL_ORDER[normalized] < ACCESS_LEVEL_ORDER[required]:
+        raise SSHFlingError(
+            f"Account {username!r} is root-equivalent; use access level admin/root-equivalent.",
+            2,
+            username=username,
+            access_level=normalized,
+            required_access_level=required,
+        )
+    return normalized
+
+
+def enforce_policy_access_level(policy_caps, username=None, requested_access_level=None):
+    policy_level = normalize_access_level(policy_caps.get("access_level", DEFAULT_ACCESS_LEVEL))
+    requested = normalize_access_level(requested_access_level, default=policy_level)
+    validate_access_level_for_username(username, requested)
+    if ACCESS_LEVEL_ORDER[requested] > ACCESS_LEVEL_ORDER[policy_level]:
+        raise SSHFlingError(
+            f"Requested access level {requested} exceeds policy access level {policy_level}.",
+            2,
+            username=username,
+            requested_access_level=requested,
+            policy_access_level=policy_level,
+        )
+    return requested
+
+
+def access_level_help():
+    return "Privilege classification only; does not grant OS sudo/root rights. Values: standard, operator, sudo-limited, admin/root-equivalent."
+
+
+def validate_policy_values(max_time_seconds, max_connections, access_level=None):
     if max_time_seconds < 1:
         raise SSHFlingError("Maximum time must be positive.", 2)
     if max_time_seconds > MAX_TIME_SECONDS:
@@ -676,7 +773,11 @@ def validate_policy_values(max_time_seconds, max_connections):
         raise SSHFlingError("Maximum connections must be positive.", 2)
     if max_connections > MAX_CONNECTIONS:
         raise SSHFlingError(f"Maximum connections cannot exceed {MAX_CONNECTIONS}.", 2)
-    return {"max_time_seconds": max_time_seconds, "max_connections": max_connections}
+    return {
+        "max_time_seconds": max_time_seconds,
+        "max_connections": max_connections,
+        "access_level": normalize_access_level(access_level),
+    }
 
 
 def normalize_policy(data):
@@ -686,11 +787,13 @@ def normalize_policy(data):
         policy["default"] = validate_policy_values(
             int(default_data.get("max_time_seconds", policy["default"]["max_time_seconds"])),
             int(default_data.get("max_connections", policy["default"]["max_connections"])),
+            default_data.get("access_level", policy["default"]["access_level"]),
         )
     else:
         policy["default"] = validate_policy_values(
             int(data.get("max_time_seconds", policy["default"]["max_time_seconds"])),
             int(data.get("max_connections", policy["default"]["max_connections"])),
+            data.get("access_level", policy["default"]["access_level"]),
         )
 
     users = {}
@@ -700,6 +803,7 @@ def normalize_policy(data):
         users[str(username)] = validate_policy_values(
             int(user_policy.get("max_time_seconds", policy["default"]["max_time_seconds"])),
             int(user_policy.get("max_connections", policy["default"]["max_connections"])),
+            user_policy.get("access_level", policy["default"]["access_level"]),
         )
     policy["users"] = users
     return policy
@@ -728,9 +832,20 @@ def effective_policy(policy, username=None):
     return caps
 
 
-def write_policy(policy_file, max_time_seconds, max_connections, username=None):
+def write_policy(policy_file, max_time_seconds, max_connections, username=None, access_level=None):
     existing = load_policy(policy_file)
-    caps = validate_policy_values(max_time_seconds, max_connections)
+    current_caps = effective_policy(existing, username) if username else effective_policy(existing)
+    if max_time_seconds is None:
+        max_time_seconds = current_caps["max_time_seconds"]
+    if max_connections is None:
+        max_connections = current_caps["max_connections"]
+    caps = validate_policy_values(
+        max_time_seconds,
+        max_connections,
+        access_level if access_level is not None else current_caps["access_level"],
+    )
+    if username:
+        caps["access_level"] = validate_access_level_for_username(username, caps["access_level"])
     if username:
         existing.setdefault("users", {})[username] = caps
     else:
@@ -767,9 +882,12 @@ def sign_user_certificate(
     policy_file=DEFAULT_POLICY_FILE,
     login_user=None,
     permit_pty=True,
+    access_level=None,
 ):
     policy = load_policy(policy_file)
-    active_policy = effective_policy(policy, login_user or principal)
+    login_name = login_user or principal
+    active_policy = effective_policy(policy, login_name)
+    grant_access_level = enforce_policy_access_level(active_policy, login_name, access_level)
     if seconds < 1:
         raise SSHFlingError("Certificate lifetime must be positive.", 2)
     if seconds > active_policy["max_time_seconds"]:
@@ -842,6 +960,7 @@ def sign_user_certificate(
         "out": str(out_path) if out_path else None,
         "force_command": force_command,
         "policy": active_policy,
+        "access_level": grant_access_level,
     }
 
 
@@ -878,35 +997,40 @@ def cmd_policy_show(args):
     policy = load_policy(args.policy_file)
     active = effective_policy(policy, getattr(args, "user", None))
     if args.json:
-        emit_json({"ok": True, "policy": policy, "effective": active})
+        emit_json({"ok": True, "policy": policy, "effective": active, "access_levels": access_level_catalog()})
     else:
         print(f"policy: {policy['path']}")
         if getattr(args, "user", None):
             print(f"user: {args.user}")
         print(f"max-time: {format_duration(active['max_time_seconds'])}")
         print(f"max-connections: {active['max_connections']}")
+        print(f"access-level: {active['access_level']}")
+        print("least-privilege: access levels classify existing OS privileges; they do not grant sudo/root rights.")
     return 0
 
 
 def cmd_policy_install(args):
     require_root("policy install")
-    policy = write_policy(args.policy_file, args.max_time, args.max_connections, args.user)
+    policy = write_policy(args.policy_file, args.max_time, args.max_connections, args.user, getattr(args, "access_level", None))
     active = effective_policy(policy, args.user)
     audit_log(
         "policy_updated",
         user=args.user or "default",
         max_time_seconds=active["max_time_seconds"],
         max_connections=active["max_connections"],
+        access_level=active["access_level"],
         policy_file=policy.get("path"),
     )
     if args.json:
-        emit_json({"ok": True, "policy": policy, "effective": active})
+        emit_json({"ok": True, "policy": policy, "effective": active, "access_levels": access_level_catalog()})
     else:
         print(f"policy: {policy['path']}")
         if args.user:
             print(f"user: {args.user}")
         print(f"max-time: {format_duration(active['max_time_seconds'])}")
         print(f"max-connections: {active['max_connections']}")
+        print(f"access-level: {active['access_level']}")
+        print("least-privilege: access levels classify existing OS privileges; they do not grant sudo/root rights.")
     return 0
 
 
@@ -930,6 +1054,7 @@ def cmd_cert_issue(args):
         policy_file=args.policy_file,
         login_user=args.login_user,
         permit_pty=not args.no_pty,
+        access_level=getattr(args, "access_level", None),
     )
     audit_log(
         "access_grant_created",
@@ -943,6 +1068,7 @@ def cmd_cert_issue(args):
         serial=result["serial"],
         source_address=args.source_address,
         permit_pty=not args.no_pty,
+        access_level=result["access_level"],
     )
 
     if args.json:
@@ -1072,7 +1198,7 @@ def audit_command_name(argv):
             return "connect"
     if any(token in {"-k", "--kill"} or token.startswith("--kill=") for token in argv):
         return "kill"
-    if not argv or any(token in {"-t", "--time", "-p", "--password", "--certificate", "--username"} for token in argv):
+    if not argv or any(token in {"-t", "--time", "-p", "--password", "--certificate", "--username", "--access-level", "--role"} for token in argv):
         return "setup"
     if any(token in {"--help", "-h"} for token in argv):
         return "help"
@@ -1174,6 +1300,7 @@ def cmd_setup_password(args):
 
     policy = load_policy(args.policy_file)
     active_policy = effective_policy(policy, args.username)
+    grant_access_level = enforce_policy_access_level(active_policy, args.username, getattr(args, "access_level", None))
     seconds = lifetime_seconds(args, active_policy["max_time_seconds"])
     if seconds <= 0:
         raise SSHFlingError("Password lifetime must be positive.", 2)
@@ -1214,6 +1341,7 @@ def cmd_setup_password(args):
         "config_path": str(config_path),
         "session_wrapper": str(wrapper_path),
         "policy_file": args.policy_file,
+        "access_level": grant_access_level,
     }
 
     results = [
@@ -1253,6 +1381,8 @@ def cmd_setup_password(args):
         "expires_at_utc": dt.datetime.fromtimestamp(expires_at, UTC).isoformat(),
         "server": server_host,
         "ssh_command": f"sshfling {args.username}@{server_host}",
+        "access_level": grant_access_level,
+        "policy": active_policy,
         "results": results,
     }
     audit_log(
@@ -1265,6 +1395,7 @@ def cmd_setup_password(args):
         expires_at_utc=payload["expires_at_utc"],
         created_user=created_user,
         existing_user=existing_user,
+        access_level=grant_access_level,
         dry_run=args.dry_run,
     )
 
@@ -1274,6 +1405,7 @@ def cmd_setup_password(args):
         print(f"username: {payload['username']}")
         print(f"password: {payload['password']}")
         print(f"time: {seconds}s")
+        print(f"access-level: {grant_access_level}")
         print(f"expires: {payload['expires_at_utc']}")
         print(f"connect: {payload['ssh_command']}")
     return 0
@@ -1319,6 +1451,8 @@ def cmd_setup(args):
 
 
 def cmd_setup_certificate(args):
+    if not getattr(args, "certificate", False):
+        raise SSHFlingError("Certificate setup requires --certificate.", 2)
     require_root("temporary SSH access")
     if not args.username:
         args.username = random_username()
@@ -1351,6 +1485,7 @@ def cmd_setup_certificate(args):
         policy_file=args.policy_file,
         login_user=login_user,
         permit_pty=not args.no_pty,
+        access_level=getattr(args, "access_level", None),
     )
     result["ca"] = ca_result
     result.update(key_material)
@@ -1375,6 +1510,7 @@ def cmd_setup_certificate(args):
         generated_key=bool(result.get("generated_key")),
         source_address=args.source_address,
         permit_pty=not args.no_pty,
+        access_level=result["access_level"],
     )
 
     if args.json:
@@ -1382,6 +1518,7 @@ def cmd_setup_certificate(args):
     else:
         print(f"username: {args.username}")
         print(f"time: {seconds}s")
+        print(f"access-level: {result['access_level']}")
         if result.get("private_key"):
             print(f"private-key: {result['private_key']}")
         if result["out"]:
@@ -2567,7 +2704,11 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
         config_verified_for_removal = False
         if config_path:
             item["config"] = remove_password_grant_config(config_path, grant_username, dry_run)
-            config_verified_for_removal = bool(item["config"].get("removed") or item["config"].get("would_remove"))
+            config_verified_for_removal = bool(
+                item["config"].get("removed")
+                or item["config"].get("would_remove")
+                or item["config"].get("status") == "missing"
+            )
 
         if metadata.get("created_user") is True:
             if delete_users and config_verified_for_removal:
@@ -2653,7 +2794,8 @@ Match User {args.user}
 """
 
     rollback_paths = [wrapper_path, trusted_ca, principals_file, sshd_config]
-    if args.max_time or args.max_connections:
+    requested_access_level = getattr(args, "access_level", None)
+    if args.max_time or args.max_connections or requested_access_level:
         rollback_paths.append(policy_file_path(args.policy_file))
     rollback_snapshots = [] if args.dry_run else [(path, snapshot_file(path)) for path in rollback_paths]
     created_user_for_rollback = False
@@ -2664,15 +2806,24 @@ Match User {args.user}
         results.append(write_if_changed(trusted_ca, ca_pub.read_text(), 0o644, args.dry_run))
         results.append(write_if_changed(principals_file, principal_lines, 0o644, args.dry_run))
         results.append(write_if_changed(sshd_config, config, 0o644, args.dry_run))
-        if args.max_time or args.max_connections:
+        if args.max_time or args.max_connections or requested_access_level:
             current = load_policy(args.policy_file)
             current_user_policy = effective_policy(current, args.user)
             max_time = args.max_time if args.max_time else current_user_policy["max_time_seconds"]
             max_connections = args.max_connections if args.max_connections else current_user_policy["max_connections"]
+            access_level = requested_access_level if requested_access_level else current_user_policy["access_level"]
+            access_level = validate_access_level_for_username(args.user, access_level)
             if args.dry_run:
-                results.append({"path": str(policy_file_path(args.policy_file)), "dry_run": True, "user": args.user, "max_time_seconds": max_time, "max_connections": max_connections})
+                results.append({
+                    "path": str(policy_file_path(args.policy_file)),
+                    "dry_run": True,
+                    "user": args.user,
+                    "max_time_seconds": max_time,
+                    "max_connections": max_connections,
+                    "access_level": access_level,
+                })
             else:
-                results.append(write_policy(args.policy_file, max_time, max_connections, args.user))
+                results.append(write_policy(args.policy_file, max_time, max_connections, args.user, access_level))
 
         if args.create_user and not args.dry_run:
             if run(["id", "-u", args.user], capture=True, check=False).returncode != 0:
@@ -2726,6 +2877,7 @@ Match User {args.user}
         principals_file=principals_file,
         sshd_config=sshd_config,
         session_wrapper=wrapper_path,
+        access_level=requested_access_level,
         dry_run=args.dry_run,
         reload=args.reload,
     )
@@ -3543,6 +3695,7 @@ def build_parser():
     parser.add_argument("-t", "--time", type=duration_seconds, help="Grant access for this long, for example 30s, 5m, 1h, or 24h.")
     parser.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123456.")
     parser.add_argument("--login-user", action=StoreExplicit, help="Actual Unix login account if different from --username.")
+    parser.add_argument("--access-level", "--role", dest="access_level", help=access_level_help())
     parser.add_argument("-p", "--password", action="store_true", help="Create temporary password SSH access. This is the default; kept for compatibility.")
     parser.add_argument("--certificate", action="store_true", help="Create temporary certificate SSH access instead of the default password access.")
     parser.add_argument("-k", "--kill", nargs="?", const=True, metavar="USERNAME", help="Kill active sshfling SSH session(s), optionally by name like s432.")
@@ -3577,6 +3730,7 @@ def build_parser():
     setup.add_argument("-t", "--time", type=duration_seconds, required=True, help="Access lifetime, for example 30s, 5m, 1h, or 24h.")
     setup.add_argument("--username", help="Temporary SSH username. Defaults to a random name like s123456.")
     setup.add_argument("--login-user", action=StoreExplicit, help="Actual Unix login account if different from --username.")
+    setup.add_argument("--access-level", "--role", dest="access_level", help=access_level_help())
     setup.add_argument("-p", "--password", action="store_true", help="Create temporary password SSH access. This is the default; kept for compatibility.")
     setup.add_argument("--certificate", action="store_true", help="Create temporary certificate SSH access instead of the default password access.")
     setup.add_argument("--ca-key", action=StoreExplicit, default=str(default_ca_key_path()), help="CA private key path.")
@@ -3632,6 +3786,7 @@ def build_parser():
     cert_issue.add_argument("--public-key-file", help="Public key file to sign.")
     cert_issue.add_argument("--username", help="Temporary SSH username/certificate principal.")
     cert_issue.add_argument("--login-user", help="Unix login user for policy lookup and forced-command metadata.")
+    cert_issue.add_argument("--access-level", "--role", dest="access_level", help=access_level_help())
     cert_issue.add_argument("--principal", help=argparse.SUPPRESS)
     cert_issue.add_argument("-t", "--time", type=duration_seconds, help="Access lifetime, for example 30s, 5m, 1h, or 24h.")
     cert_issue.add_argument("--seconds", type=positive_int, default=300, help="Certificate and session lifetime.")
@@ -3644,7 +3799,7 @@ def build_parser():
     cert_issue.add_argument("--out", help="Write certificate to this path instead of stdout.")
     cert_issue.set_defaults(func=cmd_cert_issue)
 
-    policy = subparsers.add_parser("policy", help="Show or install max time and connection limits.")
+    policy = subparsers.add_parser("policy", help="Show or install max time, connection, and access-level limits.")
     policy_sub = policy.add_subparsers(dest="policy_command")
     policy_show = policy_sub.add_parser("show", help="Show the active policy.")
     policy_show.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help="Policy file path.")
@@ -3653,8 +3808,9 @@ def build_parser():
     policy_install = policy_sub.add_parser("install", help="Install the host policy.")
     policy_install.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help="Policy file path.")
     policy_install.add_argument("--user", help="Set policy for this Unix login user. Omit to set the default policy.")
-    policy_install.add_argument("--max-time", type=duration_seconds, default=MAX_TIME_SECONDS, help="Maximum SSH lifetime. Hard cap is 24h.")
-    policy_install.add_argument("--max-connections", type=positive_int, default=MAX_CONNECTIONS, help="Maximum active sessions. Hard cap is 10.")
+    policy_install.add_argument("--max-time", type=duration_seconds, help="Maximum SSH lifetime. Omit to preserve the current effective value. Hard cap is 24h.")
+    policy_install.add_argument("--max-connections", type=positive_int, help="Maximum active sessions. Omit to preserve the current effective value. Hard cap is 10.")
+    policy_install.add_argument("--access-level", "--role", dest="access_level", help=access_level_help())
     policy_install.set_defaults(func=cmd_policy_install)
 
     host = subparsers.add_parser("host", help="Configure a production SSH host for temporary access.")
@@ -3670,6 +3826,7 @@ def build_parser():
     host_install.add_argument("--policy-file", default=DEFAULT_POLICY_FILE, help="Installed policy file path.")
     host_install.add_argument("--max-time", type=duration_seconds, help="Install a maximum SSH lifetime policy. Hard cap is 24h.")
     host_install.add_argument("--max-connections", type=positive_int, help="Install a maximum active session policy. Hard cap is 10.")
+    host_install.add_argument("--access-level", "--role", dest="access_level", help="Install a policy access level for this Unix account. " + access_level_help())
     host_install.add_argument("--create-user", action="store_true", help="Create the Unix user if missing.")
     host_install.add_argument("--no-validate", dest="validate", action="store_false", help="Skip sshd -t validation.")
     host_install.add_argument("--reload", action="store_true", help="Reload sshd after writing config.")

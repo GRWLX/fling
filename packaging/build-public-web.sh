@@ -5,6 +5,10 @@ package_dist="${1:-package-dist}"
 public_dir="${2:-public}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+export LC_ALL=C
+export TZ=UTC
+umask 022
+
 # shellcheck source=packaging/version.sh
 source "$repo_root/packaging/version.sh"
 version="$(assert_sshfling_version_matches_source "${VERSION:?VERSION is required}" "$repo_root")"
@@ -23,8 +27,15 @@ build_epoch="${SOURCE_DATE_EPOCH:-}"
 if [[ -z "$build_epoch" ]]; then
   build_epoch="$(git -C "$repo_root" log -1 --format=%ct 2>/dev/null || date -u +%s)"
 fi
+if [[ ! "$build_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be Unix epoch seconds, got: $build_epoch" >&2
+  exit 2
+fi
 
 cleanup_signing() {
+  if [[ -n "$gpg_home" && -d "$gpg_home" ]] && command -v gpgconf >/dev/null 2>&1; then
+    GNUPGHOME="$gpg_home" gpgconf --kill all >/dev/null 2>&1 || true
+  fi
   if [[ -n "$gpg_pass_file" ]]; then
     rm -f "$gpg_pass_file"
   fi
@@ -63,16 +74,42 @@ setup_repo_signing() {
   local requested_key="${SSHFLING_REPO_GPG_KEY_ID:-}"
   local expected_fingerprint
   local generate_key="${SSHFLING_GENERATE_REPO_SIGNING_KEY:-}"
+  local generate_repo_key=0
+  local require_signatures="${REQUIRE_REPO_SIGNATURES:-}"
 
-  if [[ -z "$private_key" && -z "$requested_key" && "$generate_key" != "1" && "$generate_key" != "true" ]]; then
+  if is_truthy "$generate_key"; then
+    generate_repo_key=1
+  fi
+  expected_fingerprint="$(normalize_gpg_fingerprint "${SSHFLING_REPO_GPG_FINGERPRINT:-}")"
+  if is_truthy "$require_signatures"; then
+    if [[ -z "$private_key" ]]; then
+      echo "REQUIRE_REPO_SIGNATURES requires SSHFLING_REPO_GPG_PRIVATE_KEY for stable repository signing." >&2
+      exit 2
+    fi
+    if [[ -z "$expected_fingerprint" ]]; then
+      echo "REQUIRE_REPO_SIGNATURES requires SSHFLING_REPO_GPG_FINGERPRINT as the approved trust anchor." >&2
+      exit 2
+    fi
+    if (( generate_repo_key )); then
+      echo "REQUIRE_REPO_SIGNATURES does not allow generated test repository signing keys." >&2
+      exit 2
+    fi
+  fi
+  if [[ -z "$private_key" && -z "$requested_key" ]] && (( ! generate_repo_key )); then
     return 0
+  fi
+  if [[ -z "$private_key" && -n "$requested_key" ]] && (( ! generate_repo_key )); then
+    if ! command -v gpg >/dev/null 2>&1 || ! gpg --batch --list-secret-keys "$requested_key" >/dev/null 2>&1; then
+      echo "Repository signing key ID was provided without matching signing material; building an unsigned package site." >&2
+      return 0
+    fi
   fi
   if ! command -v gpg >/dev/null 2>&1; then
     echo "gpg is required when repository signing is enabled." >&2
     exit 127
   fi
 
-  if [[ -n "$private_key" || "$generate_key" == "1" || "$generate_key" == "true" ]]; then
+  if [[ -n "$private_key" ]] || (( generate_repo_key )); then
     gpg_home="$(mktemp -d)"
     chmod 700 "$gpg_home"
     export GNUPGHOME="$gpg_home"
@@ -80,11 +117,11 @@ setup_repo_signing() {
 
   if [[ -n "$private_key" ]]; then
     printf '%s\n' "$private_key" | gpg --batch --import
-  elif [[ "$generate_key" == "1" || "$generate_key" == "true" ]]; then
+  elif (( generate_repo_key )); then
     gpg --batch --passphrase '' --quick-generate-key "SSHFling package repository <packages@sshfling.local>" rsa3072 sign 1y
   fi
 
-  if [[ -n "$requested_key" && ( -n "$private_key" || ( "$generate_key" != "1" && "$generate_key" != "true" ) ) ]]; then
+  if [[ -n "$requested_key" && ( -n "$private_key" || "$generate_repo_key" == "0" ) ]]; then
     repo_signing_key="$requested_key"
   else
     repo_signing_key="$(gpg --batch --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
@@ -97,11 +134,6 @@ setup_repo_signing() {
   repo_signing_fingerprint="$(gpg --batch --with-colons --fingerprint "$repo_signing_key" | awk -F: '/^fpr:/ {print toupper($10); exit}')"
   if [[ -z "$repo_signing_fingerprint" ]]; then
     echo "Could not determine repository signing key fingerprint." >&2
-    exit 2
-  fi
-  expected_fingerprint="$(normalize_gpg_fingerprint "${SSHFLING_REPO_GPG_FINGERPRINT:-}")"
-  if is_truthy "${REQUIRE_REPO_SIGNATURES:-}" && [[ -z "$expected_fingerprint" ]]; then
-    echo "REQUIRE_REPO_SIGNATURES requires SSHFLING_REPO_GPG_FINGERPRINT as the approved trust anchor." >&2
     exit 2
   fi
   if [[ -n "$expected_fingerprint" && "$repo_signing_fingerprint" != "$expected_fingerprint" ]]; then
@@ -141,6 +173,55 @@ apt_checksum_section() {
     size="$(wc -c <"$file" | tr -d '[:space:]')"
     printf ' %s %16s %s\n' "$checksum" "$size" "$file"
   done
+}
+
+normalize_public_tree_timestamps() {
+  find "$public_dir" -exec touch -h -d "@$build_epoch" {} +
+}
+
+normalize_chocolatey_package() {
+  local package_path="$public_dir/chocolatey/sshfling.${version}.nupkg"
+  local install_script="$public_dir/chocolatey/install.ps1"
+  local package_sha
+
+  if [[ ! -f "$package_path" ]]; then
+    return
+  fi
+
+  python3 - "$public_dir/chocolatey" "$package_path" "$build_epoch" <<'PY'
+import sys
+import time
+import zipfile
+from pathlib import Path
+
+root = Path(sys.argv[1])
+output = Path(sys.argv[2])
+epoch = max(int(sys.argv[3]), 315532800)
+date_time = time.gmtime(epoch)[:6]
+
+with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    for relative in ["sshfling.nuspec", "tools/chocolateyinstall.ps1"]:
+        data = (root / relative).read_bytes()
+        info = zipfile.ZipInfo(relative, date_time=date_time)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = (0o644 & 0xFFFF) << 16
+        archive.writestr(info, data)
+PY
+
+  package_sha="$(sha256sum "$package_path" | awk '{print $1}')"
+  python3 - "$install_script" "$package_sha" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+package_sha = sys.argv[2]
+lines = path.read_text(encoding="utf-8").splitlines()
+lines = [
+    f'$expectedSha256 = "{package_sha}"' if line.startswith("$expectedSha256 = ") else line
+    for line in lines
+]
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
 }
 
 write_apt_release() {
@@ -188,7 +269,7 @@ sign_rpm_packages() {
 
   while IFS= read -r -d '' rpm_path; do
     rpmsign "${rpm_defines[@]}" --addsign "$rpm_path"
-  done < <(find "$public_dir/rpm" -maxdepth 1 -type f -name '*.rpm' -print0)
+  done < <(find "$public_dir/rpm" -maxdepth 1 -type f -name '*.rpm' -print0 | sort -z)
 }
 
 rm -rf "$public_dir"
@@ -215,7 +296,7 @@ setup_repo_signing
 (
   cd "$public_dir/apt"
   dpkg-scanpackages . /dev/null > Packages
-  gzip -9c Packages > Packages.gz
+  gzip -9cn Packages > Packages.gz
   sha256sum -- *.deb > SHA256SUMS
   write_apt_release > Release
   if (( repo_signed )); then
@@ -227,7 +308,11 @@ setup_repo_signing
 if (( repo_signed )); then
   sign_rpm_packages
 fi
-createrepo_c "$public_dir/rpm"
+createrepo_c \
+  --revision "$build_epoch" \
+  --set-timestamp-to-revision \
+  --workers 1 \
+  "$public_dir/rpm"
 (
   cd "$public_dir/rpm"
   sha256sum -- *.rpm > SHA256SUMS
@@ -347,7 +432,8 @@ uninstall_apt() {
     /etc/apt/sources.list.d/sshfling.list \
     /etc/apt/sources.list.d/fling.list \
     /etc/apt/preferences.d/sshfling \
-    /etc/apt/preferences.d/fling
+    /etc/apt/preferences.d/fling \
+    /usr/share/keyrings/sshfling-repo.gpg
   sudo apt-get update || true
 }
 
@@ -386,7 +472,7 @@ EOF
 uninstall_rpm() {
   if command -v rpm >/dev/null 2>&1 && rpm -q sshfling >/dev/null 2>&1; then
     if command -v dnf >/dev/null 2>&1; then
-      sudo dnf remove -y sshfling
+      sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
     else
       sudo yum remove -y sshfling
     fi
@@ -515,6 +601,7 @@ SH
 )
 
 bash "$(dirname "${BASH_SOURCE[0]}")/build-community-manifests.sh" "$package_dist" "$public_dir" "$base_url" "$version" "$repository"
+normalize_chocolatey_package
 
 signed_repo_html=""
 if (( repo_signed )); then
@@ -598,35 +685,48 @@ $signed_repo_html
 curl -fsSL $base_url/install.sh -o "\$tmp/install.sh"
 bash "\$tmp/install.sh" apt
 bash "\$tmp/install.sh" dnf</code></pre>
-  <p>Uninstall:</p>
-  <pre><code>tmp="\$(mktemp -d)"
-curl -fsSL $base_url/install.sh -o "\$tmp/install.sh"
-bash "\$tmp/install.sh" uninstall apt
-bash "\$tmp/install.sh" uninstall dnf</code></pre>
+  <p>Uninstall with the host package manager rather than downloading a fresh mutable helper script. These commands remove SSHFling package and repository trust files only; they preserve host SSH configuration, grant state, CA material, local policy, Python, OpenSSH, account-management tools, process tools, and util-linux.</p>
+  <pre><code>sudo apt-get remove -y sshfling
+sudo rm -f /etc/apt/sources.list.d/sshfling.list /etc/apt/preferences.d/sshfling /usr/share/keyrings/sshfling-repo.gpg
+sudo apt-get update || true
+
+sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+
+sudo yum remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling</code></pre>
   <h2>Homebrew</h2>
   <pre><code>brew install $base_url/homebrew/sshfling.rb</code></pre>
   <p>Uninstall:</p>
-  <pre><code>tmp="\$(mktemp -d)"
-curl -fsSL $base_url/install.sh -o "\$tmp/install.sh"
-bash "\$tmp/install.sh" uninstall brew</code></pre>
+  <pre><code>brew uninstall sshfling</code></pre>
   <h2>macOS pkg</h2>
   <p>Enterprise macOS distribution should use signed and notarized packages. This helper is a convenience wrapper around the published package artifact.</p>
   <pre><code>tmp="\$(mktemp -d)"
 curl -fsSL $base_url/macos/install-pkg.sh -o "\$tmp/install-pkg.sh"
 sudo bash "\$tmp/install-pkg.sh"</code></pre>
   <p>Uninstall:</p>
-  <pre><code>tmp="\$(mktemp -d)"
-curl -fsSL $base_url/macos/uninstall-pkg.sh -o "\$tmp/uninstall-pkg.sh"
-sudo bash "\$tmp/uninstall-pkg.sh"</code></pre>
+  <pre><code>sudo rm -f /usr/local/bin/sshfling
+sudo rm -rf /usr/local/share/sshfling
+sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&amp;1 || true</code></pre>
+  <p>The macOS uninstall commands preserve /etc/sshfling, host SSH configuration, CA material, grant state, Python, and OpenSSH for separate fleet policy.</p>
   <h2>Windows MSI</h2>
   <p>Enterprise Windows distribution should use Authenticode-signed installers and verify signatures before deployment. This helper is a convenience wrapper around the published MSI artifact.</p>
   <pre><code>\$installer = Join-Path \$env:TEMP "sshfling-install.ps1"
 Invoke-WebRequest -Uri "$base_url/windows/install.ps1" -OutFile \$installer
 &amp; \$installer</code></pre>
   <p>Uninstall:</p>
-  <pre><code>\$uninstaller = Join-Path \$env:TEMP "sshfling-uninstall.ps1"
-Invoke-WebRequest -Uri "$base_url/windows/uninstall.ps1" -OutFile \$uninstaller
-&amp; \$uninstaller</code></pre>
+  <pre><code>\$uninstallRoots = @(
+  "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+\$products = Get-ItemProperty -Path \$uninstallRoots -ErrorAction SilentlyContinue |
+  Where-Object { \$_.DisplayName -eq "SSHFling" }
+foreach (\$product in \$products) {
+  \$productCode = \$product.PSChildName
+  if (\$productCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { throw "Could not determine MSI product code for SSHFling." }
+  Start-Process msiexec.exe -Wait -ArgumentList "/x", \$productCode, "/qn", "/norestart"
+}</code></pre>
+  <p>MSI uninstall removes installer-managed files and PATH state only. Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, CA material, grant state, and external policy remain under fleet ownership.</p>
   <h2>More ecosystems</h2>
   <p>Arch/AUR, Alpine, FreeBSD, OpenBSD, pkgsrc, Nix, Guix, Void, Gentoo, Slackware, openSUSE OBS, Snapcraft, Termux, AppImage, Scoop, winget, and Chocolatey manifests are under <a href="$base_url/community.html">community package manifests</a>.</p>
   <h2>Downloads</h2>
@@ -634,3 +734,5 @@ Invoke-WebRequest -Uri "$base_url/windows/uninstall.ps1" -OutFile \$uninstaller
 </body>
 </html>
 HTML
+
+normalize_public_tree_timestamps

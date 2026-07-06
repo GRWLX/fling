@@ -21,6 +21,9 @@ site that includes:
 The current matrix is maintained in [Build Targets](../build-targets.md).
 Repository registration examples are maintained in
 [Repository Registration](../repos.md).
+OpenSSH, Python, account-management, process-tool, uninstall, and
+original-state ownership rules are maintained in
+[OpenSSH Dependency Policy](../openssh-dependencies.md).
 
 ## Behavior Contract For Release Notes
 
@@ -32,6 +35,10 @@ the release notes call out an intentional breaking change:
 - Certificate-only setup options, including `--ca-key`, `--public-key-file`,
   `--out`, `--login-user`, `--key-id`, `--source-address`, and `--no-pty`, are
   invalid unless `--certificate` is present.
+- Access levels set with `--access-level` or `--role` are policy
+  classifications for least-privilege review. They do not grant sudo,
+  administrator, group, IAM, or root-equivalent privileges; host controls own
+  actual privilege assignment.
 - `sshfling password prune` removes expired tracked password grants only. It
   leaves active grants in place, skips unmanaged records, locks expired
   SSHFling-created users by default, deletes those users only with
@@ -40,7 +47,10 @@ the release notes call out an intentional breaking change:
 - Package uninstall removes package files and managed repository entries. Host
   SSH configuration, password grant state, CA material, `/etc/sshfling`
   configuration, and package-manager dependency state require separate host or
-  fleet cleanup.
+  fleet cleanup. macOS pkg and Windows MSI uninstall paths are package removal
+  actions, not full original-state restores. Linux uninstall paths must not call
+  package-manager autoremove/autopurge actions; DNF uninstall examples must
+  disable `clean_requirements_on_remove` when removing only SSHFling.
 
 ## Prerequisites
 
@@ -55,6 +65,9 @@ the release notes call out an intentional breaking change:
   as a production macOS installer.
 - Authenticode signing access if the MSI is distributed as a production Windows
   installer.
+- Original dependency and host-configuration state recorded in MDM, Intune,
+  Group Policy, configuration management, or backup evidence when a release
+  plan promises full system revert.
 - Commercial license approval before publishing or redistributing packages.
 
 ## Version Validation
@@ -127,8 +140,9 @@ Run the release validation workflows in this order for a public package release:
 `Container image tests`, `Package install tests`, and `Cross OS validation` are
 manual release gates when you are publishing a specific version. Manual
 `Release packages with public web` runs are verification dry runs unless the
-`publish` input is set to `true`. Tag pushes publish after the package site is
-verified and the protected `github-pages` environment approves the deploy job.
+`publish` input is set to `true`. Tag pushes request publication after the
+package site is verified, but deployment still depends on stable repository
+signing secrets and the configured `github-pages` environment protections.
 
 For a tag-based release, create and push an annotated version tag from the
 reviewed release commit:
@@ -253,6 +267,18 @@ BASE_URL="https://grwlx.github.io/sshfling"
 brew install "$BASE_URL/homebrew/sshfling.rb"
 ```
 
+For macOS pkg uninstall, the generated helper removes `/usr/local/bin/sshfling`
+and `/usr/local/share/sshfling`, then forgets the pkg receipt. It deliberately
+preserves `/etc/sshfling` for local policy, CA material, and operator-managed
+configuration review.
+
+For Windows MSI uninstall, the generated helper calls `msiexec /x` for the
+installed SSHFling product code. The MSI removes the product directory and the
+PATH entry it added. It does not remove Python, OpenSSH, Windows OpenSSH Server,
+host SSH configuration, temporary grant state, CA material, or
+policy/configuration stored outside the install directory. For the Windows zip,
+remove the extracted directory and any PATH entries added by your deployment.
+
 ## Community Repository Submission
 
 The package site generates community manifests, but official ecosystem
@@ -274,7 +300,8 @@ Attach or link this evidence in the release ticket:
 
 - Tag name and commit SHA.
 - Release notes that accurately describe password default access, explicit
-  certificate mode, prune behavior, and uninstall limits.
+  certificate mode, access-level classification, prune behavior, and uninstall
+  limits.
 - Successful `Release packages with public web` run.
 - Successful `pages-build-deployment` run.
 - Successful `Package install tests` run for the released version.
@@ -282,3 +309,5 @@ Attach or link this evidence in the release ticket:
 - Published package-site URL.
 - GPG signing key fingerprint used for the repository.
 - Checksums file URL for raw downloads.
+- Release evidence links for compliance mapping, threat-model review, OpenSSH
+  dependency ownership, and platform coverage exceptions.

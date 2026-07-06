@@ -19,7 +19,7 @@ separate written agreement from GRWLX.
   monitoring, rollback guidance, key rotation, and incident handling.
 - [Security and Compliance](Security-and-Compliance.md): package signing,
   repository trust, access controls, audit expectations, and SOC 2, ISO 27001,
-  and NIST evidence mapping.
+  NIST, and CIS-style evidence mapping without certification claims.
 
 ## Canonical Project Docs
 
@@ -33,6 +33,12 @@ separate written agreement from GRWLX.
   enterprise package releases.
 - [Release Evidence Packet](../release-evidence.md): template for release
   approvals, artifacts, signing, validation, rollback, and exceptions.
+- [Compliance Mapping](../compliance-mapping.md): caveated SOC 2, ISO
+  27001:2022, NIST SP 800-53 Rev. 5, and CIS-style control crosswalk.
+- [SSHFling Threat Model](../threat-model.md): package, access, issuer,
+  OpenSSH, and AI-assisted workflow threats, assumptions, and residual risks.
+- [OpenSSH Dependency Policy](../openssh-dependencies.md): OpenSSH, Python,
+  package dependency, uninstall, and original-state ownership rules.
 - [Enterprise Readiness Assessment](../enterprise-readiness.md): SOC 2, ISO
   27001, and NIST package-publishing gap assessment.
 - [Codex and Enterprise Detached Workflows](../codex-enterprise-workflow.md):

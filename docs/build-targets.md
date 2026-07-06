@@ -2,6 +2,10 @@
 
 This is the build and packaging target matrix for public distribution.
 
+OpenSSH and adjacent runtime dependency ownership, version, install, uninstall,
+and original-state policy is tracked in
+[openssh-dependencies.md](openssh-dependencies.md).
+
 SSHFling is proprietary commercial software. Installing, running, redistributing,
 or submitting generated manifests to third-party repositories requires the rights
 described in the project LICENSE or a separate written agreement from GRWLX.
@@ -48,6 +52,30 @@ These files are generated into the public package site. Some can be used directl
 | winget | `winget/manifests/.../SSHFling/...` |
 | Chocolatey | `chocolatey/sshfling.VERSION.nupkg`, `chocolatey/sshfling.nuspec` |
 
+## Platform Coverage Evidence Expectations
+
+The tables above describe artifacts and generated packaging metadata, not a
+blanket support claim for every OS, language runtime, CPU architecture, hardware
+class, or embedded target that can consume those files.
+
+Each enterprise release must keep a compact platform coverage declaration in
+the release evidence packet. Do not commit large generated OS-by-architecture
+matrices to the repo; generated release evidence belongs under the ignored
+`docs/release/enterprise-release-evidence/` tree and should be attached or
+linked from the release ticket.
+
+Minimum platform coverage evidence:
+
+| Coverage area | Expected release evidence |
+| --- | --- |
+| OS and distribution versions | Exact OS name, version, package format, install path, validation workflow run, and exception record for any advertised-but-untested version. |
+| Language and runtime dependencies | Python implementation/version, shell or PowerShell version where relevant, OpenSSH client/server versions, and account-management tool availability for password grants. |
+| CPU architecture | Architecture reported by the validation host or package metadata, with explicit status for `x86_64`/`amd64`, `arm64`/`aarch64`, and any 32-bit, `s390x`, `ppc64le`, or `riscv64` claims. |
+| Hardware class | Evidence that the release was validated on the claimed class, such as server VM, desktop workstation, container image, edge appliance, IoT gateway, or customer-managed embedded Linux host. |
+| ARM and IoT targets | For ARM, Raspberry Pi OS, OpenWrt, Yocto, Buildroot, or similar edge systems, record whether SSHFling was tested as client-only, certificate server, or password-grant server and which required host tools were present. |
+| FPGA and SoC platforms | Evidence applies only to the host CPU/OS control plane running Python and OpenSSH. Do not imply FPGA fabric, bitstream, accelerator, or vendor toolchain support unless separately validated and approved. |
+| Unsupported or deferred targets | Release-ticket exception with owner, customer impact, compensating control, expiration, and retest trigger. |
+
 ## Automated Verification
 
 `packaging/verify-public-web.sh` checks the generated package site for every target above. The public web release workflow runs this verifier before uploading the GitHub Pages artifact.
@@ -92,7 +120,14 @@ workflow that installs or builds the published package outputs on:
 - macOS from the published `.pkg` and generated Homebrew formula.
 - Windows from the published MSI and portable zip.
 
-Client mode only needs Python and OpenSSH client tools. Server-side certificate grants need OpenSSH server tooling on the target host. Server-side password grants are Linux-oriented because they need account-management tools such as `useradd`, `chpasswd`, `usermod`, and `chage`.
+Client mode only needs Python and OpenSSH client tools. Server-side certificate
+grants need OpenSSH server tooling on the target host. Server-side password
+grants are Linux-oriented because they need account-management tools such as
+`useradd`, `chpasswd`, `usermod`, and `chage`. Package uninstall removes
+SSHFling package files for the selected install path, not shared Python,
+OpenSSH, account-management, `procps`, or `util-linux` dependency state. See
+[openssh-dependencies.md](openssh-dependencies.md) for the platform-specific
+dependency matrix and original-state evidence requirements.
 
 `.github/workflows/package-install-tests.yml` remains a smaller public-package
 install smoke for the primary release artifacts.

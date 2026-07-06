@@ -12,6 +12,17 @@ owner="${OWNER:-${repository%%/*}}"
 require_repo_signatures="${REQUIRE_REPO_SIGNATURES:-}"
 
 missing=0
+verify_gpg_home=""
+
+cleanup_verify() {
+  if [[ -n "$verify_gpg_home" && -d "$verify_gpg_home" ]]; then
+    if command -v gpgconf >/dev/null 2>&1; then
+      GNUPGHOME="$verify_gpg_home" gpgconf --kill all >/dev/null 2>&1 || true
+    fi
+    rm -rf "$verify_gpg_home"
+  fi
+}
+trap cleanup_verify EXIT
 
 require_file() {
   local path="$1"
@@ -91,6 +102,78 @@ normalize_gpg_fingerprint() {
   printf '%s' "${1:-}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
 }
 
+setup_verify_gpg() {
+  if [[ -n "$verify_gpg_home" ]]; then
+    return 0
+  fi
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "gpg is required to verify signed repository metadata." >&2
+    missing=1
+    return 1
+  fi
+
+  verify_gpg_home="$(mktemp -d)"
+  chmod 700 "$verify_gpg_home"
+  if ! GNUPGHOME="$verify_gpg_home" gpg --batch --import "$public_dir/sshfling-repo.asc" >/dev/null 2>&1; then
+    echo "could not import repository signing key for verification" >&2
+    missing=1
+    return 1
+  fi
+}
+
+verify_gpg_signature() {
+  local label="$1"
+  shift
+
+  if ! setup_verify_gpg; then
+    return
+  fi
+  if ! GNUPGHOME="$verify_gpg_home" gpg --batch --verify "$@" >/dev/null 2>&1; then
+    echo "invalid repository signature: $label" >&2
+    missing=1
+  fi
+}
+
+verify_rpm_package_signatures() {
+  local expected_key_id
+  local rpmdb_dir
+  local rpm_path
+  local sig_info
+
+  if [[ ! -f "$public_dir/sshfling-repo.asc" ]]; then
+    return
+  fi
+  if ! command -v rpm >/dev/null 2>&1; then
+    echo "rpm is required to verify signed RPM packages." >&2
+    missing=1
+    return
+  fi
+
+  expected_key_id="$(normalize_gpg_fingerprint "$(cat "$public_dir/sshfling-repo-fingerprint.txt" 2>/dev/null || true)")"
+  expected_key_id="${expected_key_id: -16}"
+  rpmdb_dir="$(mktemp -d)"
+  if ! rpm --define "_dbpath $rpmdb_dir" --import "$public_dir/sshfling-repo.asc" >/dev/null 2>&1; then
+    echo "could not import repository signing key into temporary RPM database" >&2
+    missing=1
+    rm -rf "$rpmdb_dir"
+    return
+  fi
+
+  while IFS= read -r -d '' rpm_path; do
+    sig_info="$(rpm -qp --qf '%{SIGPGP:pgpsig}\n%{SIGGPG:pgpsig}\n%{RSAHEADER:pgpsig}\n%{DSAHEADER:pgpsig}\n' "$rpm_path" 2>/dev/null || true)"
+    sig_info="$(printf '%s\n' "$sig_info" | tr '[:lower:]' '[:upper:]')"
+    if [[ -z "$expected_key_id" ]] || ! printf '%s\n' "$sig_info" | grep -Fq "KEY ID $expected_key_id"; then
+      echo "missing RPM package signature: ${rpm_path#"$public_dir/"}" >&2
+      missing=1
+    elif ! rpm --define "_dbpath $rpmdb_dir" --checksig "$rpm_path" >/dev/null 2>&1; then
+      echo "invalid RPM package signature: ${rpm_path#"$public_dir/"}" >&2
+      missing=1
+    fi
+  done < <(find "$public_dir/rpm" -maxdepth 1 -type f -name '*.rpm' -print0 | sort -z)
+
+  rm -rf "$rpmdb_dir"
+}
+
 verify_repo_fingerprint_file() {
   local expected actual key_actual
 
@@ -105,12 +188,21 @@ verify_repo_fingerprint_file() {
     return
   fi
   expected="$(normalize_gpg_fingerprint "${SSHFLING_REPO_GPG_FINGERPRINT:-}")"
+  if is_truthy "$require_repo_signatures" && [[ -z "$expected" ]]; then
+    echo "REQUIRE_REPO_SIGNATURES requires SSHFLING_REPO_GPG_FINGERPRINT as the approved trust anchor." >&2
+    missing=1
+  fi
   if [[ -n "$expected" && "$actual" != "$expected" ]]; then
     echo "repository signing fingerprint mismatch: expected $expected, found $actual" >&2
     missing=1
   fi
   if command -v gpg >/dev/null 2>&1 && [[ -f "$public_dir/sshfling-repo.asc" ]]; then
-    key_actual="$(gpg --batch --show-keys --with-colons "$public_dir/sshfling-repo.asc" | awk -F: '/^fpr:/ {print toupper($10); exit}')"
+    if setup_verify_gpg; then
+      key_actual="$(
+        GNUPGHOME="$verify_gpg_home" gpg --batch --show-keys --with-colons "$public_dir/sshfling-repo.asc" |
+          awk -F: '/^fpr:/ {print toupper($10); exit}'
+      )"
+    fi
     if [[ "$key_actual" != "$actual" ]]; then
       echo "repository signing key fingerprint does not match sshfling-repo-fingerprint.txt" >&2
       echo "key:  ${key_actual:-UNKNOWN}" >&2
@@ -132,6 +224,19 @@ require_signed_repository() {
   require_contains "install.sh" "expected_repo_fingerprint="
   require_contains "install.sh" "verify_repo_key"
   require_contains "install.sh" "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling"
+  require_not_contains "install.sh" 'expected_repo_fingerprint=""'
+  if [[ -f "$public_dir/sshfling-repo.asc" ]]; then
+    if [[ -f "$public_dir/apt/InRelease" ]]; then
+      verify_gpg_signature "apt/InRelease" "$public_dir/apt/InRelease"
+    fi
+    if [[ -f "$public_dir/apt/Release.gpg" && -f "$public_dir/apt/Release" ]]; then
+      verify_gpg_signature "apt/Release.gpg" "$public_dir/apt/Release.gpg" "$public_dir/apt/Release"
+    fi
+    if [[ -f "$public_dir/rpm/repodata/repomd.xml.asc" && -f "$public_dir/rpm/repodata/repomd.xml" ]]; then
+      verify_gpg_signature "rpm/repodata/repomd.xml.asc" "$public_dir/rpm/repodata/repomd.xml.asc" "$public_dir/rpm/repodata/repomd.xml"
+    fi
+    verify_rpm_package_signatures
+  fi
 }
 
 require_file ".nojekyll"
@@ -141,6 +246,16 @@ require_file "community.html"
 require_contains "install.sh" "signed-by=/usr/share/keyrings/sshfling-repo.gpg"
 require_contains "install.sh" "repo_gpgcheck=1"
 require_contains "install.sh" "verify_repo_key"
+require_contains "install.sh" "apt-get remove -y sshfling"
+require_contains "install.sh" "dnf --setopt=clean_requirements_on_remove=False remove -y sshfling"
+require_contains "install.sh" "yum remove -y sshfling"
+require_contains "install.sh" "/usr/share/keyrings/sshfling-repo.gpg"
+require_not_contains "install.sh" "dnf remove -y sshfling"
+require_not_contains "install.sh" "autoremove"
+require_not_contains "install.sh" "autopurge"
+require_not_contains "install.sh" "apt-get purge"
+require_not_contains "install.sh" "dnf autoremove"
+require_not_contains "install.sh" "yum autoremove"
 
 require_file "apt/Packages.gz"
 require_file "apt/Packages"
@@ -200,6 +315,22 @@ require_file "chocolatey/install.ps1"
 require_contains "index.html" "SSHFling ${version} packages"
 require_contains "index.html" "uninstall"
 require_contains "index.html" "proprietary commercial software"
+require_contains "index.html" "sudo apt-get remove -y sshfling"
+require_contains "index.html" "/usr/share/keyrings/sshfling-repo.gpg"
+require_contains "index.html" "sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling"
+require_contains "index.html" "sudo yum remove -y sshfling"
+require_contains "index.html" "brew uninstall sshfling"
+require_contains "index.html" "sudo pkgutil --forget io.sshfling.cli"
+require_contains "index.html" "Start-Process msiexec.exe -Wait -ArgumentList"
+require_contains "index.html" "preserve host SSH configuration"
+require_contains "index.html" "Python, OpenSSH, account-management tools, process tools, and util-linux"
+require_not_contains "index.html" 'bash "$tmp/install.sh" uninstall'
+require_not_contains "index.html" "uninstall-pkg.sh"
+require_not_contains "index.html" "windows/uninstall.ps1"
+require_not_contains "index.html" "apt-get purge"
+require_not_contains "index.html" "dnf remove -y sshfling"
+require_not_contains "index.html" "autoremove"
+require_not_contains "index.html" "autopurge"
 forbidden_patterns=(
   "trusted=""yes"
   "gpgcheck=""0"
@@ -209,6 +340,10 @@ forbidden_patterns=(
   "--no-check-""certificate"
   "curl -""k"
   "--in""secure"
+  "--ignore-check""sums"
+  "--allow-empty-check""sums"
+  "--no-""verify"
+  "SkipPublisher""Check"
 )
 for pattern in "${forbidden_patterns[@]}"; do
   require_tree_not_contains "$pattern"
@@ -217,6 +352,8 @@ require_contains "community.html" "FreeBSD"
 require_contains "community.html" "OpenBSD"
 require_contains "community.html" "pkgsrc"
 require_contains "community.html" "proprietary commercial software"
+require_contains "community.html" "Dependency ownership remains with the target operating system"
+require_contains "community.html" "Trust model: review the generated manifest"
 require_gzip_contains "apt/Packages.gz" "Version: ${version}"
 
 require_contains "homebrew/sshfling.rb" "license :cannot_represent"
@@ -226,6 +363,9 @@ require_contains "snap/snapcraft.yaml" "license: Proprietary"
 require_contains "scoop/sshfling.json" '"identifier": "Proprietary"'
 require_contains "chocolatey/sshfling.nuspec" "<requireLicenseAcceptance>true</requireLicenseAcceptance>"
 require_contains "winget/manifests/g/${owner}/SSHFling/${version}/${owner}.SSHFling.locale.en-US.yaml" "License: SSHFling Commercial License"
+require_contains "chocolatey/install.ps1" "Get-FileHash -Algorithm SHA256"
+require_contains "appimage/AppImageBuilder.yml" "deb https://archive.ubuntu.com/ubuntu/ noble main universe"
+require_not_contains "appimage/AppImageBuilder.yml" "deb http://archive.ubuntu.com/ubuntu/"
 
 if [[ -f "$public_dir/sshfling-repo.gpg" || -f "$public_dir/sshfling-repo.asc" ]] || is_truthy "$require_repo_signatures"; then
   require_signed_repository

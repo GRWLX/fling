@@ -25,6 +25,9 @@ jobs:
   resolve:
     name: Resolve image metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       owner_lc: ${{ steps.metadata.outputs.owner_lc }}
       version: ${{ steps.metadata.outputs.version }}
@@ -49,6 +52,10 @@ jobs:
   publish:
     name: Publish ${{ matrix.title }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
     needs: resolve
     strategy:
       fail-fast: false

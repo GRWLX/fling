@@ -18,6 +18,79 @@ function Fail([string]$Message) {
   throw "cross validation failed: $Message"
 }
 
+function Test-PathUnderRoot([string]$Path, [string]$Root) {
+  if (-not $Path -or -not $Root) {
+    return $false
+  }
+  try {
+    $separators = [char[]]@("\", "/")
+    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd($separators)
+    $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd($separators)
+  }
+  catch {
+    return $false
+  }
+  if ($fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $true
+  }
+  return $fullPath.StartsWith($fullRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-CommandFromProgramFiles([string]$Path) {
+  $programRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+  foreach ($root in $programRoots) {
+    if (Test-PathUnderRoot $Path $root) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Assert-WindowsMsiMetadata([string]$Path, [string]$ExpectedVersion) {
+  if (-not (Test-CommandFromProgramFiles $Path)) {
+    return
+  }
+
+  $uninstallRoots = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+  )
+  $products = @(Get-ItemProperty -Path $uninstallRoots -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -eq "SSHFling" -and $_.DisplayVersion -eq $ExpectedVersion })
+  if ($products.Count -lt 1) {
+    Fail "Windows MSI metadata was not registered for SSHFling $ExpectedVersion"
+  }
+
+  $product = $products[0]
+  if ($product.Publisher -ne "SSHFling Maintainers") {
+    Fail "Windows MSI publisher metadata was not stable: $($product.Publisher)"
+  }
+  if (-not ([string]$product.Comments).Contains("Uninstall removes package files and PATH entry only")) {
+    Fail "Windows MSI uninstall scope metadata was missing"
+  }
+  if ($product.URLInfoAbout -ne "https://github.com/GRWLX/sshfling") {
+    Fail "Windows MSI about URL metadata was not stable: $($product.URLInfoAbout)"
+  }
+  if ([int]$product.NoModify -ne 1 -or [int]$product.NoRepair -ne 1) {
+    Fail "Windows MSI modify/repair metadata was not disabled"
+  }
+
+  $packageMetadataRoots = @(
+    "HKLM:\Software\SSHFling",
+    "HKLM:\Software\WOW6432Node\SSHFling"
+  )
+  $packageMetadata = @(Get-ItemProperty -Path $packageMetadataRoots -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if (-not $packageMetadata -or $packageMetadata.Version -ne $ExpectedVersion) {
+    Fail "Windows MSI package registry metadata did not record version $ExpectedVersion"
+  }
+  if (-not ([string]$packageMetadata.UninstallScope).Contains("host SSH state")) {
+    Fail "Windows MSI package registry metadata did not record uninstall scope"
+  }
+  if (-not ([string]$packageMetadata.DependencyScope).Contains("does not bundle or remove Python")) {
+    Fail "Windows MSI package registry metadata did not record dependency scope"
+  }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sshfling-cross-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $activeMarker = Join-Path $tempRoot "replace-active.ready"
@@ -25,6 +98,8 @@ $env:SSHFLING_ACTIVE_MARKER = $activeMarker
 $sleep30Command = @("python", "-c", "import os, pathlib, time; pathlib.Path(os.environ['SSHFLING_ACTIVE_MARKER']).write_text('ready'); time.sleep(30)")
 
 try {
+  Assert-WindowsMsiMetadata $CommandPath $Version
+
   $versionOutput = (& $CommandPath --version | Out-String).Trim()
   if ($versionOutput -ne "sshfling $Version") {
     Fail "unexpected version output: $versionOutput"
@@ -51,8 +126,75 @@ try {
   if ($policy.effective.max_time_seconds -ne 86400 -or $policy.effective.max_connections -ne 10) {
     Fail "policy defaults were not stable"
   }
+  if ($policy.effective.access_level -ne "standard") {
+    Fail "policy default access level was not standard"
+  }
   if ($policy.policy.version -ne 2) {
     Fail "policy schema version was not stable"
+  }
+  if ($policy.access_levels.standard.rank -ne 0) {
+    Fail "policy access level catalog was not returned"
+  }
+
+  $accessPolicyPath = Join-Path $tempRoot "access-policy.json"
+  @'
+{
+  "version": 2,
+  "default": {
+    "max_time_seconds": 3600,
+    "max_connections": 2,
+    "access_level": "standard-user"
+  },
+  "users": {
+    "deploy": {
+      "max_time_seconds": 1800,
+      "max_connections": 1,
+      "access_level": "operator"
+    },
+    "maint": {
+      "access_level": "sudo_limited"
+    }
+  }
+}
+'@ | Set-Content -Encoding ASCII $accessPolicyPath
+  $accessPolicyJson = (& $CommandPath --json policy show --policy-file $accessPolicyPath --user deploy | Out-String)
+  $accessPolicy = $accessPolicyJson | ConvertFrom-Json
+  if (-not $accessPolicy.ok -or $accessPolicy.effective.access_level -ne "operator" -or $accessPolicy.effective.max_time_seconds -ne 1800) {
+    Fail "policy access-level effective user policy was not normalized"
+  }
+  if ($accessPolicy.policy.default.access_level -ne "standard" -or $accessPolicy.policy.users.maint.access_level -ne "sudo-limited") {
+    Fail "policy access-level aliases were not normalized"
+  }
+  if (-not $accessPolicy.access_levels.admin.root_equivalent) {
+    Fail "policy admin access level did not report root-equivalent semantics"
+  }
+
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+  if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $preservePolicyPath = Join-Path $tempRoot "preserve-policy.json"
+    Copy-Item -Force $accessPolicyPath $preservePolicyPath
+    $preserveUserJson = (& $CommandPath --json policy install --policy-file $preservePolicyPath --user deploy --access-level sudo-limited | Out-String)
+    $preserveUser = $preserveUserJson | ConvertFrom-Json
+    if (-not $preserveUser.ok -or $preserveUser.effective.access_level -ne "sudo-limited" -or $preserveUser.effective.max_time_seconds -ne 1800 -or $preserveUser.effective.max_connections -ne 1) {
+      Fail "policy install changed user time/connection limits when only access level was supplied"
+    }
+    $preserveDefaultJson = (& $CommandPath --json policy install --policy-file $preservePolicyPath --access-level operator | Out-String)
+    $preserveDefault = $preserveDefaultJson | ConvertFrom-Json
+    if (-not $preserveDefault.ok -or $preserveDefault.effective.access_level -ne "operator" -or $preserveDefault.effective.max_time_seconds -ne 3600 -or $preserveDefault.effective.max_connections -ne 2) {
+      Fail "policy install changed default time/connection limits when only access level was supplied"
+    }
+  }
+
+  $invalidPolicyPath = Join-Path $tempRoot "invalid-policy.json"
+  '{"default": {"access_level": "superuser"}}' | Set-Content -Encoding ASCII $invalidPolicyPath
+  $invalidPolicyJson = (& $CommandPath --json policy show --policy-file $invalidPolicyPath 2>$null | Out-String)
+  if ($LASTEXITCODE -eq 0) {
+    Fail "invalid policy access level was accepted"
+  }
+  $invalidPolicy = $invalidPolicyJson | ConvertFrom-Json
+  if ($invalidPolicy.ok -or -not $invalidPolicy.error.message.Contains("Invalid access level")) {
+    Fail "invalid policy access-level error was not stable"
   }
 
   $env:SSHFLING_CONNECT_DRY_RUN = "1"
@@ -234,10 +376,12 @@ def setup_args(**overrides):
     values = {
         "password": False,
         "certificate": False,
+        "username": None,
         "ca_key": None,
         "ca_key_explicit": False,
         "login_user": None,
         "login_user_explicit": False,
+        "access_level": None,
         "public_key": None,
         "public_key_file": None,
         "out": None,
@@ -246,6 +390,11 @@ def setup_args(**overrides):
         "key_id": None,
         "source_address": None,
         "no_pty": False,
+        "session_wrapper": "/tmp/sshfling-session",
+        "policy_file": "/tmp/sshfling-policy.json",
+        "time": 60,
+        "seconds": None,
+        "json": True,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -258,6 +407,8 @@ try:
     sshfling.cmd_setup_certificate = lambda args: routes.append("certificate") or 0
 
     assert sshfling.cmd_setup(setup_args()) == 0
+    assert routes[-1] == "password", routes
+    assert sshfling.cmd_setup(setup_args(access_level="operator")) == 0
     assert routes[-1] == "password", routes
     assert sshfling.cmd_setup(setup_args(password=True)) == 0
     assert routes[-1] == "password", routes
@@ -286,6 +437,14 @@ try:
             raise AssertionError(f"{expected_option} was accepted without --certificate")
 
     try:
+        sshfling.cmd_setup(setup_args(password=True, public_key_file="/tmp/client.pub"))
+    except sshfling.SSHFlingError as exc:
+        assert "require --certificate" in exc.message, exc.message
+        assert "--public-key-file" in exc.details["options"], exc.details
+    else:
+        raise AssertionError("--password accepted certificate material options without --certificate")
+
+    try:
         sshfling.cmd_setup(setup_args(password=True, certificate=True))
     except sshfling.SSHFlingError as exc:
         assert "not both" in exc.message, exc.message
@@ -294,6 +453,40 @@ try:
 finally:
     sshfling.cmd_setup_password = original_password
     sshfling.cmd_setup_certificate = original_certificate
+
+policy = sshfling.normalize_policy({
+    "default": {"max_time_seconds": 3600, "max_connections": 2, "access_level": "standard"},
+    "users": {
+        "deploy": {"max_time_seconds": 1800, "max_connections": 1, "access_level": "operator"},
+        "maint": {"access_level": "sudo_limited"},
+    },
+})
+assert sshfling.effective_policy(policy, "deploy")["access_level"] == "operator", policy
+assert sshfling.effective_policy(policy, "maint")["access_level"] == "sudo-limited", policy
+assert sshfling.enforce_policy_access_level(sshfling.effective_policy(policy, "deploy"), "deploy", "standard") == "standard"
+try:
+    sshfling.enforce_policy_access_level(sshfling.effective_policy(policy, "deploy"), "deploy", "admin")
+except sshfling.SSHFlingError as exc:
+    assert "exceeds policy access level" in exc.message, exc.message
+else:
+    raise AssertionError("operator policy allowed admin access-level request")
+try:
+    sshfling.enforce_policy_access_level(sshfling.effective_policy(policy, "root"), "root", None)
+except sshfling.SSHFlingError as exc:
+    assert "root-equivalent" in exc.message, exc.message
+else:
+    raise AssertionError("root-equivalent user accepted standard access-level policy")
+
+with tempfile.TemporaryDirectory() as policy_tmp:
+    policy_path = Path(policy_tmp) / "policy.json"
+    try:
+        sshfling.write_policy(policy_path, 300, 1, "root", "standard")
+    except sshfling.SSHFlingError as exc:
+        assert "root-equivalent" in exc.message, exc.message
+    else:
+        raise AssertionError("root policy accepted a standard access level")
+    written = sshfling.write_policy(policy_path, 300, 1, "root", "root-equivalent")
+    assert written["users"]["root"]["access_level"] == "admin", written
 
 with tempfile.TemporaryDirectory() as tmpdir:
     root = Path(tmpdir)
@@ -309,10 +502,12 @@ with tempfile.TemporaryDirectory() as tmpdir:
         ("sshflingexisting", False, now - 60, {"managed_by": "sshfling", "auth": "password"}),
         ("sshflingunmanaged", True, now - 60, {}),
         ("sshflingmissingconfig", True, now - 60, {"managed_by": "sshfling", "auth": "password", "config_path": None}),
+        ("sshflingmissingfile", True, now - 60, {"managed_by": "sshfling", "auth": "password", "skip_config": True}),
     ]
     for username, created_user, expires_at, extra in fixtures:
         conf = conf_dir / f"91-sshfling-password-{username}.conf"
-        conf.write_text(f"# Managed by sshfling password grant for {username}.\n", encoding="utf-8")
+        if not extra.pop("skip_config", False):
+            conf.write_text(f"# Managed by sshfling password grant for {username}.\n", encoding="utf-8")
         metadata = {
             "username": username,
             "created_user": created_user,
@@ -371,10 +566,38 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert missing_config["status"] == "pruned", missing_config
     assert missing_config["user"]["would_lock"] is True, missing_config
     assert missing_config["user"]["delete_skipped"], missing_config
+    missing_file = by_user["sshflingmissingfile"]
+    assert missing_file["status"] == "pruned", missing_file
+    assert missing_file["config"]["status"] == "missing", missing_file
+    assert missing_file["user"]["would_delete"] is True, missing_file
     spoofed = by_user["root"]
     assert spoofed["status"] == "skipped-unmanaged", spoofed
     assert "config" not in spoofed, spoofed
     assert "user" not in spoofed, spoofed
+
+    sshfling.run = lambda *args, **kwargs: UserExists()
+    try:
+        active_results = sshfling.prune_password_grants(
+            grant_dir,
+            username="sshflingactive",
+            delete_users=True,
+            dry_run=True,
+        )
+        expired_results = sshfling.prune_password_grants(
+            grant_dir,
+            username="sshflingexpired",
+            delete_users=True,
+            dry_run=True,
+        )
+    finally:
+        sshfling.run = original_run
+
+    assert len(active_results) == 1, active_results
+    assert active_results[0]["status"] == "active", active_results
+    assert "user" not in active_results[0], active_results
+    assert len(expired_results) == 1, expired_results
+    assert expired_results[0]["status"] == "pruned", expired_results
+    assert expired_results[0]["user"]["would_delete"] is True, expired_results
 
     captured = {}
     originals = {
@@ -392,13 +615,19 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "detect_server_host": sshfling.detect_server_host,
         "audit_log": sshfling.audit_log,
         "emit_json": sshfling.emit_json,
+        "create_ca_key": sshfling.create_ca_key,
+        "create_temp_client_key": sshfling.create_temp_client_key,
+        "sign_user_certificate": sshfling.sign_user_certificate,
     }
     try:
         sshfling.require_root = lambda action: None
         sshfling.require_password_host_tools = lambda: None
         sshfling.unix_user_exists = lambda username: True
         sshfling.ensure_unix_user = lambda username: {"user": username, "created": False}
-        sshfling.set_user_password = lambda username, password: None
+        def capture_password(username, password):
+            captured["password_user"] = username
+            captured["password"] = password
+        sshfling.set_user_password = capture_password
         sshfling.resource_file = lambda relative: command_path
         sshfling.install_file = lambda *args, **kwargs: {"installed": True}
         sshfling.write_if_changed = lambda *args, **kwargs: {"changed": True}
@@ -409,7 +638,12 @@ with tempfile.TemporaryDirectory() as tmpdir:
         sshfling.reload_sshd = lambda: {"reloaded": "sshd"}
         sshfling.detect_server_host = lambda: "127.0.0.1"
         sshfling.audit_log = lambda *args, **kwargs: None
-        sshfling.emit_json = lambda payload: None
+        sshfling.emit_json = lambda payload: captured.__setitem__("password_payload", payload)
+        def certificate_material_forbidden(*args, **kwargs):
+            raise AssertionError("password setup attempted to create certificate material")
+        sshfling.create_ca_key = certificate_material_forbidden
+        sshfling.create_temp_client_key = certificate_material_forbidden
+        sshfling.sign_user_certificate = certificate_material_forbidden
         prune_called = {"value": False}
         def record_prune(*args, **kwargs):
             prune_called["value"] = True
@@ -453,6 +687,98 @@ with tempfile.TemporaryDirectory() as tmpdir:
         for name, value in originals.items():
             setattr(sshfling, name, value)
     assert captured["metadata"]["created_user"] is False, captured
+    assert captured["metadata"]["auth"] == "password", captured
+    assert captured["metadata"]["access_level"] == "standard", captured
+    assert captured["password_user"] == "sshflingexisting", captured
+    assert len(captured["password"]) >= 20 and not any(ch.isspace() for ch in captured["password"]), captured
+    password_payload = captured["password_payload"]
+    assert password_payload["auth"] == "password", password_payload
+    assert password_payload["access_level"] == "standard", password_payload
+    assert password_payload["policy"]["access_level"] == "standard", password_payload
+    assert password_payload["password"] == captured["password"], password_payload
+    for forbidden_key in ["certificate", "private_key", "public_key", "ca"]:
+        assert forbidden_key not in password_payload, password_payload
+
+    try:
+        sshfling.cmd_setup_certificate(setup_args(certificate=False, ca_key=str(root / "ca"), session_dir=str(root / "sessions")))
+    except sshfling.SSHFlingError as exc:
+        assert "requires --certificate" in exc.message, exc.message
+    else:
+        raise AssertionError("certificate setup was reachable without --certificate")
+
+    cert_captured = {"calls": []}
+    cert_originals = {
+        "require_root": sshfling.require_root,
+        "create_ca_key": sshfling.create_ca_key,
+        "create_temp_client_key": sshfling.create_temp_client_key,
+        "sign_user_certificate": sshfling.sign_user_certificate,
+        "detect_server_host": sshfling.detect_server_host,
+        "audit_log": sshfling.audit_log,
+        "emit_json": sshfling.emit_json,
+    }
+    try:
+        cert_root = root / "cert-flow"
+        cert_root.mkdir()
+        sshfling.require_root = lambda action: None
+        def fake_create_ca_key(args):
+            cert_captured["calls"].append("create_ca_key")
+            return {
+                "ok": True,
+                "status": "created",
+                "ca_key": str(args.ca_key),
+                "ca_public_key": str(args.ca_key) + ".pub",
+            }
+        def fake_create_temp_client_key(username, session_dir):
+            cert_captured["calls"].append("create_temp_client_key")
+            key_dir = Path(session_dir) / username
+            key_dir.mkdir(parents=True)
+            private_key = key_dir / "id_ed25519"
+            public_key = key_dir / "id_ed25519.pub"
+            private_key.write_text("stub private key\n", encoding="utf-8")
+            public_key.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest cert-flow\n", encoding="utf-8")
+            return {"private_key": str(private_key), "public_key": str(public_key), "generated_key": True}
+        def fake_sign_user_certificate(**kwargs):
+            cert_captured["calls"].append("sign_user_certificate")
+            cert_captured["sign_kwargs"] = kwargs
+            return {
+                "ok": True,
+                "certificate": "ssh-ed25519-cert-v01@openssh.com AAAA cert",
+                "username": kwargs["principal"],
+                "principal": kwargs["principal"],
+                "seconds": kwargs["seconds"],
+                "valid_before": "2030-01-01T00:00:00Z",
+                "key_id": kwargs["key_id"] or "stub-key-id",
+                "serial": 123,
+                "out": kwargs["out_file"],
+                "force_command": "stub",
+                "access_level": kwargs["access_level"] or "standard",
+            }
+        sshfling.create_ca_key = fake_create_ca_key
+        sshfling.create_temp_client_key = fake_create_temp_client_key
+        sshfling.sign_user_certificate = fake_sign_user_certificate
+        sshfling.detect_server_host = lambda: "203.0.113.10"
+        sshfling.audit_log = lambda *args, **kwargs: None
+        sshfling.emit_json = lambda payload: cert_captured.__setitem__("payload", payload)
+        assert sshfling.cmd_setup(setup_args(
+            certificate=True,
+            username="sshflingcert",
+            ca_key=str(cert_root / "ca"),
+            session_dir=str(cert_root / "sessions"),
+        )) == 0
+    finally:
+        for name, value in cert_originals.items():
+            setattr(sshfling, name, value)
+    assert cert_captured["calls"] == ["create_ca_key", "create_temp_client_key", "sign_user_certificate"], cert_captured
+    assert cert_captured["sign_kwargs"]["principal"] == "sshflingcert", cert_captured
+    assert cert_captured["sign_kwargs"]["seconds"] == 60, cert_captured
+    assert "cert-flow" in cert_captured["sign_kwargs"]["public_key_text"], cert_captured
+    cert_payload = cert_captured["payload"]
+    assert cert_payload["ok"] is True, cert_payload
+    assert cert_payload["generated_key"] is True, cert_payload
+    assert cert_payload["private_key"], cert_payload
+    assert cert_payload["ca"]["status"] == "created", cert_payload
+    assert cert_payload["access_level"] == "standard", cert_payload
+    assert "password" not in cert_payload, cert_payload
 
     host_root = root / "host"
     host_root.mkdir()

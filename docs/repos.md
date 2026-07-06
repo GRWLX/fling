@@ -15,10 +15,20 @@ SSHFling is proprietary commercial software. Installing, running, redistributing
 BASE_URL="https://OWNER.github.io/REPO"
 ```
 
+For operator-facing install and uninstall commands across DEB/RPM, public
+repos, macOS, Windows, BSD/community manifests, containers, and dependency
+rollback caveats, see [Install and uninstall runbook](install-uninstall.md).
+
 Enterprise Linux installs should use the signed APT or RPM repository examples
 below. The saved installer script is a convenience wrapper for interactive
 hosts; it is listed after the signed Linux repository examples and is not the
 production trust anchor for managed fleets.
+
+OpenSSH, Python, account-management, process, and util-linux dependency
+ownership is documented in [OpenSSH dependency policy](openssh-dependencies.md).
+SSHFling packages declare required runtime capabilities where the package
+manager supports them, but OpenSSH versions and dependency rollback remain owned
+by the operating system, package manager, container base image, or fleet policy.
 
 ## Public Debian / Ubuntu APT
 
@@ -53,12 +63,14 @@ Uninstall:
 
 ```bash
 sudo apt remove -y sshfling
-sudo rm -f /etc/apt/sources.list.d/sshfling.list /etc/apt/preferences.d/sshfling
+sudo rm -f /etc/apt/sources.list.d/sshfling.list /etc/apt/preferences.d/sshfling /usr/share/keyrings/sshfling-repo.gpg
 sudo apt update
 ```
 
 Package uninstall removes the APT package and repo registration; it does not
-remove `/etc/sshfling` policy/config files or other host state.
+remove `/etc/sshfling` policy/config files or other host state. Do not add
+`apt autoremove`, `apt autopurge`, or `apt purge` to SSHFling uninstall runbooks
+unless fleet policy explicitly owns dependency and conffile cleanup.
 
 ## Public RHEL / Fedora / Rocky / Alma RPM
 
@@ -102,12 +114,15 @@ Use `sudo yum install -y sshfling` on older yum-based hosts.
 Uninstall:
 
 ```bash
-sudo dnf remove -y sshfling
+sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
 sudo rm -f /etc/yum.repos.d/sshfling.repo
 ```
 
 Package uninstall removes the RPM package and repo registration; it does not
-remove `/etc/sshfling` policy/config files or other host state.
+remove `/etc/sshfling` policy/config files or other host state. The DNF example
+disables dependency cleanup so Python, OpenSSH, account-management tools,
+`procps`, and `util-linux` are not removed as unused dependencies of SSHFling.
+Use `sudo yum remove -y sshfling` on older yum-based hosts without DNF.
 
 ## Convenience Wrappers
 
@@ -123,13 +138,21 @@ curl -fsSL "${BASE_URL}/install.sh" -o "$tmp/install.sh"
 bash "$tmp/install.sh"
 ```
 
-Convenience wrapper uninstall on Linux or Homebrew hosts:
+Prefer direct package-manager uninstall commands over downloading a fresh
+mutable helper script for removal:
 
 ```bash
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "${BASE_URL}/install.sh" -o "$tmp/install.sh"
-bash "$tmp/install.sh" uninstall
+sudo apt remove -y sshfling
+sudo rm -f /etc/apt/sources.list.d/sshfling.list /etc/apt/preferences.d/sshfling /usr/share/keyrings/sshfling-repo.gpg
+sudo apt update
+
+sudo dnf --setopt=clean_requirements_on_remove=False remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+
+sudo yum remove -y sshfling
+sudo rm -f /etc/yum.repos.d/sshfling.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
+
+brew uninstall sshfling
 ```
 
 Convenience wrapper with a specific installer path:
@@ -141,17 +164,6 @@ curl -fsSL "${BASE_URL}/install.sh" -o "$tmp/install.sh"
 bash "$tmp/install.sh" apt
 bash "$tmp/install.sh" dnf
 bash "$tmp/install.sh" brew
-```
-
-Convenience wrapper with a specific uninstall path:
-
-```bash
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "${BASE_URL}/install.sh" -o "$tmp/install.sh"
-bash "$tmp/install.sh" uninstall apt
-bash "$tmp/install.sh" uninstall dnf
-bash "$tmp/install.sh" uninstall brew
 ```
 
 ## Public Homebrew
@@ -178,11 +190,19 @@ sudo bash "$tmp/install-pkg.sh"
 Uninstall:
 
 ```bash
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "${BASE_URL}/macos/uninstall-pkg.sh" -o "$tmp/uninstall-pkg.sh"
-sudo bash "$tmp/uninstall-pkg.sh"
+sudo rm -f /usr/local/bin/sshfling
+sudo rm -rf /usr/local/share/sshfling
+sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&1 || true
 ```
+
+The macOS pkg installs `/usr/local/bin/sshfling`,
+`/usr/local/share/sshfling`, and a default `/etc/sshfling/policy.json`. The
+uninstall helper removes the command and packaged templates, then forgets the
+pkg receipt. It intentionally leaves `/etc/sshfling` in place because that
+directory can contain local policy, CA material, or operator-managed
+configuration. The pkg does not bundle Python or OpenSSH, and package uninstall
+does not restore those dependencies or host SSH configuration to their original
+state.
 
 ## Public Windows MSI
 
@@ -196,11 +216,29 @@ Invoke-WebRequest -Uri "$BaseUrl/windows/install.ps1" -OutFile $Installer
 Uninstall:
 
 ```powershell
-$BaseUrl = "https://OWNER.github.io/REPO"
-$Uninstaller = Join-Path $env:TEMP "sshfling-uninstall.ps1"
-Invoke-WebRequest -Uri "$BaseUrl/windows/uninstall.ps1" -OutFile $Uninstaller
-& $Uninstaller
+$UninstallRoots = @(
+  "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+$Products = Get-ItemProperty -Path $UninstallRoots -ErrorAction SilentlyContinue |
+  Where-Object { $_.DisplayName -eq "SSHFling" }
+foreach ($Product in $Products) {
+  $ProductCode = $Product.PSChildName
+  if ($ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {
+    throw "Could not determine MSI product code for SSHFling."
+  }
+  Start-Process msiexec.exe -Wait -ArgumentList "/x", $ProductCode, "/qn", "/norestart"
+}
 ```
+
+The MSI installs under `Program Files\SSHFling`, adds that directory to the
+machine PATH, and records uninstall/dependency scope in Add/Remove Programs and
+`HKLM\Software\SSHFling`. MSI uninstall removes the product directory and the
+PATH entry added by the MSI. It does not uninstall Python, OpenSSH, Windows
+OpenSSH Server, host SSH configuration, temporary grant state, CA material, or
+policy/configuration stored outside the install directory. For the portable
+Windows zip, delete the extracted directory and remove only PATH entries your
+deployment added.
 
 ## Public Community Manifests
 
@@ -230,16 +268,45 @@ The full build target matrix is tracked in [build-targets.md](build-targets.md).
 
 The public package workflow can sign APT metadata, RPM packages, and RPM repo metadata. Configure `SSHFLING_REPO_GPG_PRIVATE_KEY` as an ASCII-armored private key secret for stable production signing; `SSHFLING_REPO_GPG_FINGERPRINT` as the approved public trust-anchor fingerprint; `SSHFLING_REPO_GPG_KEY_ID` and `SSHFLING_REPO_GPG_PASSPHRASE` are optional. Tag-based package publishing and manual runs with `publish=true` require the stable private key and approved fingerprint secrets, require a version tag ref, and refuse ephemeral repository signing keys. Manual workflow dispatches can set `generate_test_signing_key=true` for disposable dry-run package sites only.
 
-Client mode only needs Python and OpenSSH client tools. Server-side certificate grants need OpenSSH server tooling on the target host. Server-side password grants are Linux-oriented and need account-management tools such as `useradd`, `chpasswd`, `usermod`, and `chage`; the generated Linux package metadata includes the matching `passwd`, `shadow`, or `shadow-utils` dependency where that ecosystem uses one.
+Client mode only needs Python and OpenSSH client tools. Server-side certificate
+grants need OpenSSH server tooling on the target host. Server-side password
+grants are Linux-oriented and need account-management tools such as `useradd`,
+`chpasswd`, `usermod`, and `chage`; generated package metadata includes the
+closest ecosystem packages where that package manager supports them. See
+[OpenSSH dependency policy](openssh-dependencies.md) for the cross-platform
+dependency matrix and uninstall/original-state rules.
+
+Policy files can classify grants as `standard`, `operator`, `sudo-limited`, or
+`admin`/root-equivalent with `access_level`. Package installation may seed a
+default policy, but fleet policy owns the account's actual privileges through
+Unix groups, sudoers, PAM, AD, MDM, service-manager policy, or equivalent host
+controls. Repository docs and package metadata must not imply that SSHFling
+grants sudo/root rights; it only validates requested role classification against
+the policy file before issuing temporary credentials.
 
 Package docs and release notes must preserve the current runtime contract:
 
 - Bare `sudo sshfling` creates a temporary password grant.
 - Certificate grants require `--certificate`; certificate-specific setup options fail without it.
+- Access levels are policy classifications for least-privilege review, not privilege assignment. `standard` is the default; `operator`, `sudo-limited`, and `admin`/root-equivalent must be explicitly approved in policy for the account receiving the grant.
 - `sshfling password prune` removes expired tracked password grants only. `--all` scans all tracked grants but leaves active grants in place, `--delete-users` only deletes expired SSHFling-created Unix users, and existing users explicitly allowed with `--allow-existing-user` are locked and expired but never deleted.
 - `sshfling host uninstall` removes managed certificate host SSH configuration by default. Shared CA, wrapper, policy-user, and Unix-account removal are opt-in flags.
 
-Package uninstall removes SSHFling-managed package files and repository entries for the selected install path, but it preserves host SSH configuration, password grant state, CA material, and `/etc/sshfling` policy/config files for separate host cleanup. Dependency packages remain under the host package manager and fleet policy. Do not assume uninstall restores Python, OpenSSH, account-management tools, `procps`, or `util-linux` to the exact preinstall state unless your configuration-management system records and enforces that state.
+Package uninstall removes SSHFling-managed package files and repository entries
+for the selected install path, but it preserves host SSH configuration, password
+grant state, CA material, and `/etc/sshfling` policy/config files for separate
+host cleanup. Dependency packages remain under the host package manager and
+fleet policy. Do not assume uninstall restores Python, OpenSSH,
+account-management tools, `procps`, or `util-linux` to the exact preinstall
+state unless your configuration-management system records and enforces that
+state. Dependency cleanup must be a separate reviewed fleet action, not part of
+the SSHFling package uninstall wrapper. For macOS and Windows fleets, keep
+original-state evidence in MDM, Intune, Group Policy, or backup records before
+deployment if a full revert may be required.
+
+The same ownership rule applies to BSDs, containers, Nix/Guix, Homebrew,
+Scoop, winget, Chocolatey, Snap, AppImage, Termux, and generated community
+manifests.
 
 Build packages first:
 
@@ -331,6 +398,19 @@ brew install sshfling
 
 For production `.pkg` distribution, sign and notarize the package.
 
+For direct `.pkg` uninstall, remove SSHFling package files and forget the
+receipt, but preserve `/etc/sshfling` until local policy and CA material are
+reviewed:
+
+```bash
+sudo rm -f /usr/local/bin/sshfling
+sudo rm -rf /usr/local/share/sshfling
+sudo pkgutil --forget io.sshfling.cli
+```
+
+This does not revert host SSH configuration, temporary grant state, Python,
+OpenSSH, or any other dependency to its original state.
+
 ## Windows MSI
 
 MSI files are not installed from APT/YUM-style repos. Common registration paths:
@@ -346,3 +426,14 @@ msiexec /i sshfling-0.1.12.msi /qn
 ```
 
 For production, sign the MSI with an Authenticode certificate.
+
+Silent uninstall:
+
+```powershell
+msiexec /x sshfling-0.1.12.msi /qn /norestart
+```
+
+MSI uninstall removes files and installer-managed PATH state only. It does not
+restore Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, or
+temporary access state to their original values. Use Intune, Group Policy, or
+configuration management records for full system revert expectations.

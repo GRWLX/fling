@@ -22,10 +22,13 @@ sudo rm -f /etc/apt/sources.list.d/sshfling.list
 sudo apt update
 ```
 
-See [Repository and package registration](docs/repos.md) for DNF/Yum,
-Homebrew, macOS, Windows, and convenience wrapper examples. See [Uninstall and
-cleanup](#uninstall-and-cleanup) for host SSH configuration and local state
-removal.
+See [Install and uninstall runbook](docs/install-uninstall.md) for DEB/RPM,
+public repository, macOS, Windows, BSD/community, container, dependency, and
+original-state instructions. See [Repository and package registration](docs/repos.md)
+for package publishing details, [OpenSSH dependency policy](docs/openssh-dependencies.md)
+for dependency ownership, version, install, uninstall, and original-state
+expectations, and [Uninstall and cleanup](#uninstall-and-cleanup) for host SSH
+configuration and local state removal.
 
 Password access:
 
@@ -291,7 +294,28 @@ curl -sS \
 
 ## Uninstall and Cleanup
 
-Package uninstall removes the `sshfling` command and packaged templates. It does not remove host SSH configuration that was created with `sshfling host install`, temporary password grant state, local CA keys, or `/etc/sshfling` policy/config files. Package-manager dependencies such as Python, OpenSSH client/server packages, account-management tools, `procps`, or `util-linux` are controlled by the host package manager and fleet policy; uninstall does not guarantee that dependency state is restored to the exact preinstall state.
+Package-channel-specific uninstall commands are in
+[Install and uninstall runbook](docs/install-uninstall.md).
+
+Package uninstall removes SSHFling-managed package files for the selected
+install path. It does not remove host SSH configuration that was created with
+`sshfling host install`, temporary password grant state, local CA keys, or
+`/etc/sshfling` policy/config files. Dependency packages such as Python,
+OpenSSH client/server packages, account-management tools, `procps`, or
+`util-linux` are controlled by the host package manager and fleet policy;
+uninstall does not guarantee that dependency state is restored to the exact
+preinstall state. Do not include `apt autoremove`, `apt autopurge`,
+`dnf autoremove`, or `yum autoremove` in SSHFling uninstall runbooks unless
+dependency cleanup is a separate reviewed fleet action. On DNF hosts, use
+`dnf --setopt=clean_requirements_on_remove=False remove sshfling` when removing
+only SSHFling. Linux packages store their own service-account install-state
+record under root-owned `/var/lib/sshfling/package-state` and remove that
+package state during uninstall/purge handling. Record original dependency and
+host configuration state in MDM, configuration management, or backups if exact
+revert is required.
+
+The detailed cross-platform dependency policy is in
+[OpenSSH dependency policy](docs/openssh-dependencies.md).
 
 Convenience wrapper for Linux and Homebrew package uninstall:
 
@@ -322,6 +346,8 @@ curl -fsSL https://grwlx.github.io/sshfling/macos/uninstall-pkg.sh -o "$tmp/unin
 sudo bash "$tmp/uninstall-pkg.sh"
 ```
 
+The macOS pkg uninstall helper removes `/usr/local/bin/sshfling` and `/usr/local/share/sshfling`, then forgets the pkg receipt. It intentionally preserves `/etc/sshfling` because that directory can contain local policy, CA material, or operator-managed configuration.
+
 Windows MSI:
 
 ```powershell
@@ -329,6 +355,8 @@ $Uninstaller = Join-Path $env:TEMP "sshfling-uninstall.ps1"
 Invoke-WebRequest -Uri "https://grwlx.github.io/sshfling/windows/uninstall.ps1" -OutFile $Uninstaller
 & $Uninstaller
 ```
+
+MSI uninstall removes the installed SSHFling product directory and the PATH entry added by the MSI. It does not uninstall Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, temporary grant state, CA material, or policy/configuration stored outside the install directory. For the portable Windows zip, delete the extracted directory and remove only PATH entries you added yourself.
 
 Remove host SSH configuration created by `sshfling host install`:
 
@@ -412,7 +440,11 @@ Package outputs go to `dist/`.
 - `.pkg` needs macOS `pkgbuild` and `productbuild`.
 
 Repo registration instructions are in [docs/repos.md](docs/repos.md).
+Package-channel install and uninstall instructions are in
+[docs/install-uninstall.md](docs/install-uninstall.md).
 The current OS/package target matrix is in [docs/build-targets.md](docs/build-targets.md).
+OpenSSH and runtime dependency ownership policy is in
+[docs/openssh-dependencies.md](docs/openssh-dependencies.md).
 Enterprise publishing guidance is in [docs/release-checklist.md](docs/release-checklist.md),
 [docs/release-evidence.md](docs/release-evidence.md),
 [docs/enterprise-readiness.md](docs/enterprise-readiness.md), and the
@@ -422,9 +454,46 @@ GitHub Actions workflows are included for public distribution:
 
 - `Container image tests` builds packages into Docker-based install targets and runs the SSHFling server/client image smoke tests through `make test-containers`.
 - `Release packages without web` builds release artifacts only.
-- `Release packages with public web` verifies a GitHub Pages package site for commands such as `sudo apt install -y sshfling`, `sudo dnf install -y sshfling`, Homebrew, macOS `.pkg`, Windows MSI installs, and community package manifests for BSDs, Arch/AUR, Alpine, Nix, Guix, Void, Gentoo, Slackware, openSUSE OBS, Snapcraft, Termux, AppImage, Scoop, winget, and Chocolatey. Manual runs are dry-run verification unless `publish=true`; tag runs publish after verification and protected Pages approval.
+- `Release packages with public web` verifies a GitHub Pages package site for commands such as `sudo apt install -y sshfling`, `sudo dnf install -y sshfling`, Homebrew, macOS `.pkg`, Windows MSI installs, and community package manifests for BSDs, Arch/AUR, Alpine, Nix, Guix, Void, Gentoo, Slackware, openSUSE OBS, Snapcraft, Termux, AppImage, Scoop, winget, and Chocolatey. Manual runs are dry-run verification unless `publish=true`; tag runs publish only when stable repository signing secrets are present and the configured Pages environment permits deployment.
 - `Package install tests` installs from the published package site and verifies the requested `sshfling` version across Linux package repos and community package manifests.
 - `Cross OS validation` installs or builds those outputs across Linux, BSD, macOS, and Windows and checks the 24-hour policy default, copied service templates, active-session PID fields, and detached job PID lifecycle.
+
+### v0.1.12/vNext Release Readiness
+
+The latest tagged source release in this checkout is `v0.1.12` at commit
+`58b23b5fa9b90491c41b41fc206d8e907b00e8df`. The current working tree may contain
+vNext release-hardening changes that are not part of that tag until they are
+committed, validated, and tagged.
+
+`v0.1.12` shipped enterprise package publishing preparation: package builders,
+public package-site verification, repository registration docs, community
+manifest generation, release checklist/evidence templates, cross-OS/package
+install validation, release matrix tooling, and enterprise operations docs.
+
+The vNext release candidate should be treated as blocked until release evidence
+is attached for the final commit: clean worktree, workflow run URLs, artifact
+checksums, repository signing fingerprint, Pages deployment ID, release approval,
+and macOS/Windows signing or notarization evidence where applicable.
+
+Follow-up release checks from a clean final commit:
+
+```bash
+git status --short --branch
+make clean
+make test
+make test-containers
+make release-security-scan VERSION=0.1.12
+make release-security-evidence-validate
+make package VERSION=0.1.12
+make release-assets-evidence VERSION=0.1.12
+make release-matrix-validate \
+  RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
+  RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
+```
+
+Then run and link the release workflows listed above with the same version input.
+Do not publish an enterprise release from generated test signing keys, unsigned
+macOS/Windows artifacts, or unreviewed exception records.
 
 Nix users can also run from the repository:
 

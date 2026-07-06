@@ -8,13 +8,27 @@ This document is operational compliance guidance for SOC 2, ISO 27001:2022, and
 NIST SP 800-53 Rev. 5-style audit readiness. It is not legal advice and does
 not assert certification.
 
+Detailed framework crosswalks, CIS-style hardening guidance, evidence sources,
+and non-certification caveats are maintained in
+[compliance-mapping.md](compliance-mapping.md).
+
 ## Executive Summary
 
-Overall readiness: 72/100
+Overall readiness: not audit-ready; package-publishing readiness is partial.
 
-The package publishing path has meaningful technical controls: version validation, source validation, checksum generation, package-site verification, broad install/runtime tests, and optional APT/RPM repository signing. The main enterprise gaps are governance and evidence gaps: release approval is not represented as a protected gate, production signing-key custody is not documented as an operated control, rollback is not evidenced, and audit trails are not yet packaged for a reviewer.
+The package publishing path has meaningful technical controls: version
+validation, source validation, checksum generation, package-site verification,
+release evidence generation, broad install/runtime tests, and optional APT/RPM
+repository signing for the public package site. The repo still cannot prove the
+controls enterprise assessors will care about most: required release approval,
+protected tag settings, protected environment reviewers, production
+signing-key custody, completed rollback evidence, macOS notarization, Windows
+Authenticode signing, security scans as blocking gates, and platform coverage
+for advertised OS, hardware, ARM, IoT, or FPGA/SoC targets.
 
-Estimated time to audit-ready: 2 to 4 weeks, assuming GitHub repository settings and secret custody can be changed outside this documentation-only scope.
+Estimated time to audit-ready depends on external GitHub settings, signing
+certificate availability, secret-store controls, and release-operation evidence.
+The repository alone is not enough to establish an audit-ready state.
 
 ## Scope Boundary
 
@@ -24,8 +38,11 @@ In scope:
 - Public package web generation and verification.
 - Release artifacts, checksums, signing material, and generated package manifests.
 - Release validation workflows and test evidence.
+- Explicit platform coverage evidence for advertised OS versions, language
+  runtimes, CPU architectures, hardware classes, ARM/IoT targets, and FPGA/SoC
+  host control planes.
 - Operational evidence expected by enterprise customers and SOC 2, ISO 27001,
-  and NIST-aligned assessors.
+  NIST-aligned, and CIS-style hardening reviews.
 
 Out of scope for this document:
 
@@ -33,17 +50,22 @@ Out of scope for this document:
 - Legal license review.
 - Actual changes to GitHub repository settings, Actions environments, branch/tag protection, or package scripts.
 
-## Control Mapping
+## Control Mapping Summary
 
-| Area | SOC 2 reference | ISO 27001:2022 reference | NIST SP 800-53 Rev. 5 reference | Evidence objective |
-| --- | --- | --- | --- | --- |
-| Release authorization | CC8.1 | A.8.32 | CM-3, CM-5 | Prove package releases are reviewed, approved, tested, and traceable to a change record. |
-| Build and package integrity | CC8.1, CC7.1 | A.8.25, A.8.29 | SA-10, SI-2, CM-6 | Prove artifacts come from the intended source revision and passed validation before publishing. |
-| Signing and key management | CC6.1, CC6.6 | A.8.24, A.8.5 | IA-5, SC-12 | Prove signing keys are controlled, rotated, and not exposed to unauthorized users. |
-| Secrets handling | CC6.1, CC6.2 | A.5.15, A.5.18, A.8.2 | AC-6, IA-5, PM-12 | Prove repository, workflow, and signing secrets are restricted and reviewed. |
-| Rollback and recovery | CC7.4, CC7.5 | A.5.30, A.8.13 | CP-10, IR-4 | Prove a bad package can be withdrawn or reverted with accountable approval. |
-| Audit logging | CC7.2, CC7.3 | A.8.15, A.8.16 | AU-2, AU-6, AU-12 | Prove release actions, failures, approvals, and exceptions are retained. |
-| Enterprise acceptance | CC2.1, CC3.2 | A.5.8, A.5.37 | CA-2, CA-7, RA-3 | Prove customers receive a clear control checklist and residual-risk statement. |
+The detailed, caveated control mapping lives in
+[compliance-mapping.md](compliance-mapping.md). The table below is a short
+readiness summary only.
+
+| Area | SOC 2 reference | ISO 27001:2022 reference | NIST SP 800-53 Rev. 5 reference | CIS-style reference | Evidence objective |
+| --- | --- | --- | --- | --- | --- |
+| Release authorization | CC8.1 | A.8.32 | CM-3, CM-5 | CIS Controls 4, 16 | Prove package releases are reviewed, approved, tested, and traceable to a change record. |
+| Build and package integrity | CC8.1, CC7.1 | A.8.25, A.8.29 | SA-10, SI-2, SI-7, CM-6 | CIS Controls 2, 4, 16 | Prove artifacts come from the intended source revision and passed validation before publishing. |
+| Signing and key management | CC6.1, CC6.6 | A.8.24, A.8.5 | IA-5, SC-12 | CIS Controls 4, 6 | Prove signing keys are controlled, rotated, and not exposed to unauthorized users. |
+| Secrets handling | CC6.1, CC6.2 | A.5.15, A.5.18, A.8.2 | AC-6, IA-5, PM-12 | CIS Controls 5, 6 | Prove repository, workflow, and signing secrets are restricted and reviewed. |
+| Rollback and recovery | CC7.4, CC7.5 | A.5.30, A.8.13 | CP-10, IR-4 | CIS Controls 11, 17 | Prove a bad package can be withdrawn or reverted with accountable approval. |
+| Audit logging | CC7.2, CC7.3 | A.8.15, A.8.16 | AU-2, AU-6, AU-11, AU-12 | CIS Control 8 | Prove release actions, failures, approvals, and exceptions are retained. |
+| Platform coverage claims | CC2.1, CC3.2, CC8.1 | A.5.8, A.5.37, A.8.32 | CA-2, CA-7, CM-8, SA-10 | CIS Controls 2, 15, 16 | Prove advertised OS, runtime, architecture, hardware, ARM, IoT, and FPGA/SoC host claims are backed by release evidence or approved exceptions. |
+| Enterprise acceptance | CC2.1, CC3.2 | A.5.8, A.5.37 | CA-2, CA-7, RA-3 | CIS Control 15 | Prove customers receive a clear control checklist and residual-risk statement. |
 
 ## Findings
 
@@ -53,7 +75,13 @@ Status: Gap
 
 Control reference: SOC 2 CC8.1; ISO 27001 A.8.32; NIST SP 800-53 CM-3, CM-5
 
-Current state: Tag-triggered release workflows build packages and publish GitHub releases or the public package site. The reviewed workflow files do not show a protected deployment environment, required human approvers, signed tag requirement, or documented release approval record.
+Current state: Tag-triggered release workflows build packages and publish
+GitHub releases or, when signing secrets are present, the public package site.
+The public package-site deploy job names the `github-pages` environment, but
+the workflow file cannot prove that the environment has required reviewers. The
+reviewed workflow files also do not prove protected tag settings, a signed tag
+requirement, or a documented release approval record. The GitHub release asset
+workflow does not use a protected environment in source.
 
 Target state: Every production package release is linked to an approved change record, a protected tag, a required reviewer approval, passing validation workflows, and a retained release evidence packet.
 
@@ -75,7 +103,17 @@ Status: Partial
 Control reference: SOC 2 CC6.1, CC6.6; ISO 27001 A.8.24, A.8.5; NIST SP
 800-53 IA-5, SC-12
 
-Current state: The public package workflow can sign APT metadata, RPM packages, and RPM repository metadata using `SSHFLING_REPO_GPG_PRIVATE_KEY`, `SSHFLING_REPO_GPG_FINGERPRINT`, `SSHFLING_REPO_GPG_KEY_ID`, and `SSHFLING_REPO_GPG_PASSPHRASE`. Production package-site publishing now fails if the imported signing key does not match the approved fingerprint. The workflow can also generate an ephemeral repository signing key for local or test package sites. Production key owner, rotation, recovery, revocation, and access review are not evidenced in the repo.
+Current state: The public package workflow can sign APT metadata, RPM packages,
+and RPM repository metadata using `SSHFLING_REPO_GPG_PRIVATE_KEY`,
+`SSHFLING_REPO_GPG_FINGERPRINT`, `SSHFLING_REPO_GPG_KEY_ID`, and
+`SSHFLING_REPO_GPG_PASSPHRASE`. Production package-site deployment requires a
+stable signing key and rejects fingerprint mismatch. A tag push without the
+required signing secrets is verified as a dry run rather than deployed, which is
+safer than publishing unsigned repo metadata but is not evidence of a production
+signing control. The GitHub release asset path still relies on checksums,
+provenance/attestation, and release evidence unless separate artifact signatures
+are added. Production key owner, rotation, recovery, revocation, and access
+review are not evidenced in the repo.
 
 Target state: Production package signing uses a stable approved key. Access to signing secrets is limited, reviewed, and logged. Key fingerprint, creation date, expiration, storage location, rotation plan, and emergency revocation process are retained.
 
@@ -98,7 +136,12 @@ Status: Gap
 Control reference: SOC 2 CC8.1, CC6.6; ISO 27001 A.8.24, A.8.29; NIST SP
 800-53 IA-5, SC-12, SA-10
 
-Current state: Documentation states production `.pkg` distribution should be signed and notarized and production MSI distribution should be Authenticode signed. The reviewed workflows do not show Apple Developer ID signing/notarization or Windows Authenticode signing evidence.
+Current state: Documentation states production `.pkg` distribution should be
+signed and notarized and production MSI distribution should be Authenticode
+signed. The reviewed macOS and Windows build scripts and workflows build
+artifacts, but do not invoke Apple Developer ID signing, notarization,
+stapling, `codesign`, `productsign`, `notarytool`, `signtool`, or equivalent
+verification steps.
 
 Target state: Enterprise macOS and Windows artifacts are signed by approved certificates, notarized where applicable, and verified before release.
 
@@ -187,7 +230,11 @@ Status: Gap
 Control reference: SOC 2 CC7.1, CC8.1; ISO 27001 A.8.8, A.8.25, A.8.28,
 A.8.29; NIST SP 800-53 SI-2, SA-10, CM-6
 
-Current state: Existing workflows run functional build, install, package-site, and cross-OS validation. The security report notes that secret scanning, SAST, shell linting, Dockerfile linting, vulnerability scanning, and systemd unit security review are not represented as CI gates.
+Current state: Existing workflows run functional build, install, package-site,
+and cross-OS validation. The repository also includes `make
+release-security-scan` and optional scanner hooks for release evidence. The
+reviewed workflows do not invoke those targets as required publication gates,
+and no release policy in source defines critical/high findings as blocking.
 
 Target state: High-confidence critical/high security findings block production package publication, or exceptions are approved and time-bound.
 
@@ -201,6 +248,92 @@ Estimated effort: 2 to 5 days depending on tool selection and false-positive tri
 
 Priority: Medium
 
+### ER-008: CIS-Style Host Hardening Is Customer-Environment Dependent
+
+Status: Partial / Customer-owned
+
+Control reference: SOC 2 CC6.1, CC7.1; ISO 27001 A.8.9, A.8.20, A.8.22;
+NIST SP 800-53 CM-2, CM-6, CM-7, AC-6; CIS Controls 4, 5, 6, 8, 12
+
+Current state: The wiki documents package-manager trust expectations, host
+account behavior, explicit certificate mode, root-owned configuration, issuer
+service exposure limits, and logging expectations. The repo does not include
+customer OS benchmark scans, SSHD baseline evidence, SIEM retention proof, or
+configuration-management enforcement records.
+
+Target state: Enterprise deployments retain a customer-approved host hardening
+profile, OS-specific CIS Benchmark or equivalent scan evidence, documented SSH
+and account-policy deviations, centralized log retention, and configuration
+management proof for `/etc/sshfling`, SSH settings, issuer tokens, and CA
+material.
+
+Remediation:
+
+1. Use the CIS-style checklist in [compliance-mapping.md](compliance-mapping.md)
+   during enterprise deployment review.
+2. Record the customer's selected OS benchmark profile or alternative hardening
+   standard.
+3. Attach scan results, accepted deviations, remediation owners, and expiration
+   dates to the release or deployment evidence.
+4. Confirm that SSHFling logs are centralized and retained according to the
+   customer's audit-log policy.
+5. Treat host-specific hardening evidence as customer-owned unless SSHFling is
+   operating the host environment.
+
+Estimated effort: 1 to 3 days for customer evidence collection after the
+customer's baseline tooling is available.
+
+Priority: Medium for product release; High for managed enterprise deployments
+
+### ER-009: Platform Coverage Claims Need Explicit Evidence
+
+Status: Gap
+
+Control reference: SOC 2 CC2.1, CC3.2, CC8.1; ISO 27001 A.5.8, A.5.37,
+A.8.32; NIST SP 800-53 CA-2, CA-7, CM-8, SA-10; CIS Controls 2, 15, 16
+
+Current state: Build target documentation lists release artifacts, generated
+community manifests, and the current cross-OS validation workflow scope. Release
+tooling can generate artifact and package-site evidence matrices, but those
+matrices do not by themselves prove runtime support for every OS version,
+language/runtime version, CPU architecture, hardware class, ARM/IoT target, or
+FPGA/SoC host-control-plane claim. Large generated matrices under
+`docs/release/enterprise-release-evidence/` are ignored and should be attached
+or linked from the release ticket rather than treated as tracked source.
+
+Target state: Every enterprise release keeps a reviewer-friendly platform
+coverage declaration that identifies required, validated, community, customer
+validated, deferred, and unsupported platforms. Each affirmative platform claim
+has evidence such as workflow run URL, package install log, OS release data,
+Python/OpenSSH versions, CPU architecture, hardware class, artifact hash, or an
+approved exception.
+
+Remediation:
+
+1. Add the platform coverage declaration to the release evidence packet or
+   release ticket rather than committing a large generated matrix.
+2. For each advertised OS or distribution family, record exact version,
+   package format, install source, validation workflow, and owner of any
+   exception.
+3. Record Python implementation/version, OpenSSH client/server versions, shell
+   or PowerShell version where relevant, and account-management tool evidence
+   for password-grant server claims.
+4. Record CPU architecture evidence for `x86_64`/`amd64`, `arm64`/`aarch64`,
+   and any 32-bit, `s390x`, `ppc64le`, or `riscv64` claims.
+5. Treat ARM, IoT, embedded Linux, and FPGA/SoC platforms as explicit coverage
+   tiers. For FPGA/SoC systems, limit claims to the host CPU/OS control plane
+   running Python and OpenSSH unless FPGA fabric, bitstream, accelerator, or
+   vendor toolchain behavior has separate evidence.
+6. Keep generated release evidence under ignored paths such as
+   `docs/release/enterprise-release-evidence/` and attach or link the reviewed
+   output from the release ticket.
+
+Estimated effort: 1 day to define the declaration format; 30 to 60 minutes per
+release after validation jobs and customer evidence are available.
+
+Priority: Medium for product release; High when marketing, sales, or customer
+contracts name specific ARM, IoT, or embedded hardware targets.
+
 ## Enterprise Acceptance Checklist
 
 Use this checklist before calling a release enterprise-ready.
@@ -211,6 +344,7 @@ Use this checklist before calling a release enterprise-ready.
 | Release tag is protected and traceable | Tag name, commit SHA, creator, signature status if used | Required |
 | Build ran from intended source | Workflow run IDs and checkout SHA | Required |
 | Package artifacts generated | Artifact names, sizes, SHA-256 values | Required |
+| Platform coverage declared | Exact OS/runtime/CPU/hardware/ARM/IoT/FPGA scope, evidence links, and exceptions | Required before making broad support claims |
 | APT/RPM repository signing verified | GPG fingerprint, `InRelease`, `Release.gpg`, RPM signature, `repomd.xml.asc` | Required for fleet Linux repos |
 | macOS package signed and notarized | Developer ID certificate and notarization output | Required for enterprise macOS |
 | Windows MSI signed | Authenticode verification output | Required for enterprise Windows |
@@ -219,6 +353,7 @@ Use this checklist before calling a release enterprise-ready.
 | Install tests passed | `Package install tests` run ID | Required |
 | Cross-OS validation passed or exception approved | `Cross OS validation` run ID and exception record | Required |
 | Secrets access reviewed | Secret inventory and reviewer approval | Required quarterly and before first enterprise release |
+| CIS-style host hardening reviewed | Selected OS benchmark or equivalent hardening profile, scan results, deviations, and retention/logging evidence | Required for managed enterprise deployments; customer-owned for self-managed hosts |
 | Rollback target known | Previous version, Pages deployment URL, package-site artifact, rollback owner | Required |
 | Exceptions documented | Owner, risk, compensating control, expiration, re-test date | Required when any gate is skipped |
 
@@ -230,6 +365,9 @@ Retain for each release:
 - Tag, commit SHA, and diff summary.
 - GitHub Actions run URLs and logs for release, package web, install tests, and cross-OS validation.
 - Generated artifact list with SHA-256 values.
+- Platform coverage declaration covering OS versions, Python/OpenSSH versions,
+  CPU architecture, hardware class, ARM/IoT/FPGA scope, evidence links, and
+  exceptions.
 - Signing proof and public key fingerprints.
 - Runtime behavior documentation verification, including password-default and explicit-certificate statements.
 - Pages deployment URL and package-site artifact reference.
@@ -249,3 +387,6 @@ Retain for each quarter:
 - Production signing secrets and key custody must be configured in GitHub or a managed secret store.
 - macOS notarization and Windows Authenticode signing require platform certificates and workflow changes.
 - Security scanning gates require workflow changes and triage ownership.
+- Broad OS, runtime, CPU architecture, hardware, ARM, IoT, or FPGA/SoC support
+  claims require release-specific evidence; current artifact matrices and
+  workflow names are not enough by themselves.

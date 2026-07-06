@@ -813,7 +813,7 @@ AppDir:
   apt:
     arch: amd64
     sources:
-      - sourceline: deb http://archive.ubuntu.com/ubuntu/ noble main universe
+      - sourceline: deb https://archive.ubuntu.com/ubuntu/ noble main universe
     include:
       - python3
       - openssh-client
@@ -962,12 +962,18 @@ with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.write(root / relative, relative)
 PY
 
+  choco_pkg_sha="$(hash_file sha256 "$public_dir/chocolatey/sshfling.${version}.nupkg")"
   cat >"$public_dir/chocolatey/install.ps1" <<CHOCO
 \$ErrorActionPreference = "Stop"
 \$tmp = Join-Path \$env:TEMP "sshfling-chocolatey"
 New-Item -ItemType Directory -Force -Path \$tmp | Out-Null
 \$pkg = Join-Path \$tmp "sshfling.${version}.nupkg"
 Invoke-WebRequest -Uri "${base_url}/chocolatey/sshfling.${version}.nupkg" -OutFile \$pkg
+\$expectedSha256 = "${choco_pkg_sha}"
+\$actualSha256 = (Get-FileHash -Algorithm SHA256 -Path \$pkg).Hash.ToLowerInvariant()
+if (\$actualSha256 -ne \$expectedSha256) {
+  throw "SHA-256 mismatch for sshfling.${version}.nupkg"
+}
 choco install sshfling --source \$tmp -y
 CHOCO
 fi
@@ -991,6 +997,8 @@ cat >"$public_dir/community.html" <<HTML
   <h1>SSHFling ${version} community package manifests</h1>
   <p>SSHFling is proprietary commercial software. Installing, running, redistributing, or submitting these manifests to third-party repositories requires the rights described in the project LICENSE or a separate written agreement from GRWLX.</p>
   <p>These files are generated from the release artifacts. Some ecosystems can install directly from these URLs; official/community repositories such as AUR, FreeBSD Ports, pkgsrc, winget, Chocolatey, Snapcraft, and distro repos still require maintainer account submission and review.</p>
+  <p>Dependency ownership remains with the target operating system, package manager, base image, or fleet policy. The manifests declare Python, OpenSSH, account-management, process, and util-linux capabilities where each ecosystem supports that metadata, but package uninstall should not remove or downgrade those shared dependencies or revert host SSH configuration.</p>
+  <p>Trust model: review the generated manifest, verify the embedded release checksums or package hashes, and use the ecosystem's normal signed repository or maintainer-submission flow before fleet deployment. The generated helpers do not use insecure package-manager bypass flags.</p>
   <ul>
     <li>Arch / AUR: <a href="arch/PKGBUILD">PKGBUILD</a>, <a href="arch/.SRCINFO">.SRCINFO</a></li>
     <li>Alpine: <a href="alpine/APKBUILD">APKBUILD</a></li>

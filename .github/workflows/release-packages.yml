@@ -22,6 +22,7 @@ jobs:
   linux:
     name: Linux packages
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -70,6 +71,9 @@ jobs:
   macos:
     name: macOS package
     runs-on: macos-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -97,6 +101,9 @@ jobs:
   windows:
     name: Windows package
     runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -135,6 +142,7 @@ jobs:
     name: Publish GitHub release
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
@@ -153,34 +161,97 @@ jobs:
           path: release-dist
           merge-multiple: true
 
+      - name: Validate release versions and artifact set
+        env:
+          LINUX_VERSION: ${{ needs.linux.outputs.version }}
+          MACOS_VERSION: ${{ needs.macos.outputs.version }}
+          WINDOWS_VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="$LINUX_VERSION"
+          if [[ -z "$version" || "$version" != "$MACOS_VERSION" || "$version" != "$WINDOWS_VERSION" ]]; then
+            echo "Package jobs resolved different versions: linux='$LINUX_VERSION' macos='$MACOS_VERSION' windows='$WINDOWS_VERSION'" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Release tag '${GITHUB_REF_NAME}' does not match resolved package version '${version}'." >&2
+            exit 1
+          fi
+          cd release-dist
+          required_files=(
+            "sshfling_${version}_all.deb"
+            "sshfling-${version}-1.noarch.rpm"
+            "sshfling-${version}.tar.gz"
+            "sshfling-${version}.pkg"
+            "sshfling-${version}.msi"
+            "sshfling-${version}-windows.zip"
+          )
+          printf '%s\n' "${required_files[@]}" | sort >"$RUNNER_TEMP/release-required-files.txt"
+          find . -maxdepth 1 -type f -printf '%P\n' | sort >"$RUNNER_TEMP/release-actual-files.txt"
+          if ! diff -u "$RUNNER_TEMP/release-required-files.txt" "$RUNNER_TEMP/release-actual-files.txt"; then
+            echo "Release artifact set must exactly match the expected package files." >&2
+            exit 1
+          fi
+          nested_file="$(find . -mindepth 2 -type f -print -quit)"
+          if [[ -n "$nested_file" ]]; then
+            echo "Release artifacts must be flattened before publication; found nested file: $nested_file" >&2
+            exit 1
+          fi
+          for file in "${required_files[@]}"; do
+            if [[ ! -s "$file" ]]; then
+              echo "Release artifact is missing or empty: $file" >&2
+              exit 1
+            fi
+          done
+
       - name: Create checksums and release evidence
+        env:
+          VERSION: ${{ needs.linux.outputs.version }}
         run: |
           set -euo pipefail
           cd release-dist
+          required_files=(
+            "sshfling_${VERSION}_all.deb"
+            "sshfling-${VERSION}-1.noarch.rpm"
+            "sshfling-${VERSION}.tar.gz"
+            "sshfling-${VERSION}.pkg"
+            "sshfling-${VERSION}.msi"
+            "sshfling-${VERSION}-windows.zip"
+          )
           checksums="$RUNNER_TEMP/release-SHA256SUMS"
-          find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name RELEASE-EVIDENCE.md -printf '%P\0' | sort -z | xargs -0 sha256sum -- > "$checksums"
+          : >"$checksums"
+          for file in "${required_files[@]}"; do
+            sha256sum -- "$file" >>"$checksums"
+          done
           mv "$checksums" SHA256SUMS
+          sha256sum -c SHA256SUMS
           evidence="$RUNNER_TEMP/release-evidence.md"
           {
             echo "# SSHFling release package evidence"
             echo
-            echo "Version: ${{ needs.linux.outputs.version }}"
+            echo "Version: ${VERSION}"
             echo "Ref: ${GITHUB_REF_NAME}"
             echo "Commit: ${GITHUB_SHA}"
+            echo "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Expected release artifacts: ${#required_files[@]}"
             echo
             echo "| File | Bytes | SHA-256 |"
             echo "| --- | ---: | --- |"
-            while IFS= read -r -d '' file; do
-              name="${file#./}"
+            for file in "${required_files[@]}"; do
+              name="$file"
               bytes="$(wc -c <"$file" | tr -d '[:space:]')"
               hash="$(sha256sum "$file" | awk '{print $1}')"
               printf "| \`%s\` | %s | \`%s\` |\n" "$name" "$bytes" "$hash"
-            done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name RELEASE-EVIDENCE.md -print0 | sort -z)
+            done
           } > "$evidence"
           mv "$evidence" RELEASE-EVIDENCE.md
           cat RELEASE-EVIDENCE.md >>"$GITHUB_STEP_SUMMARY"
           cd ..
-          find release-dist -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum >"$RUNNER_TEMP/release-subjects.sha256"
+          {
+            for file in "${required_files[@]}" SHA256SUMS RELEASE-EVIDENCE.md; do
+              printf 'release-dist/%s\0' "$file"
+            done
+          } | xargs -0 sha256sum -- >"$RUNNER_TEMP/release-subjects.sha256"
 
       - name: Generate and validate release evidence gate
         run: |
@@ -198,7 +269,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence
-          path: docs/release/enterprise-release-evidence/generated
+          path: |
+            docs/release/enterprise-release-evidence/generated/release-assets-evidence.json
+            docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
+            docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv
           if-no-files-found: error
 
       - name: Attest release package provenance

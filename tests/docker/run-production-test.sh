@@ -107,9 +107,10 @@ assert sshfling.cmd_serve(args) == 0
 PY
 
 log "install user-specific policy caps root connections at two"
-bin/sshfling policy install --user root --max-time 1h --max-connections 2 >"$work/policy.out"
+bin/sshfling policy install --user root --max-time 1h --max-connections 2 --access-level admin >"$work/policy.out"
 grep -q "user: root" "$work/policy.out"
 grep -q "max-connections: 2" "$work/policy.out"
+grep -q "access-level: admin" "$work/policy.out"
 
 log "web console login can update user-specific policy"
 SSHFLING_WEB_PASSWORD=web-pass SSHFLING_WEB_SESSION_SECRET=test-secret bin/sshfling web \
@@ -163,12 +164,12 @@ assert "Login" in login_page
 post("/login", {"username": "admin", "password": "web-pass"})
 dashboard = opener.open(base + "/", timeout=5).read().decode()
 csrf = re.search(r'name="csrf" value="([^"]+)"', dashboard).group(1)
-post("/policy", {"csrf": csrf, "user": "root", "max_time": "25s", "max_connections": "2"})
+post("/policy", {"csrf": csrf, "user": "deploy", "max_time": "25s", "max_connections": "2"})
 policy = json.load(open(policy_path))
-assert policy["users"]["root"]["max_time_seconds"] == 25
-assert policy["users"]["root"]["max_connections"] == 2
+assert policy["users"]["deploy"]["max_time_seconds"] == 25
+assert policy["users"]["deploy"]["max_connections"] == 2
 dashboard = opener.open(base + "/", timeout=5).read().decode()
-assert "root" in dashboard
+assert "deploy" in dashboard
 assert "25s" in dashboard
 post("/logout", {"csrf": csrf})
 
@@ -418,11 +419,74 @@ grep -Eq '^s234:!' /etc/shadow
 sshd -t
 
 log "password prune --all --delete-users removes only expired managed users"
-bin/sshfling --json -t 60s \
+bin/sshfling --json -t 90s \
   --username s235active >"$work/password-active.json"
 bin/sshfling --json -t 1s \
   --username s236expired >"$work/password-expired-grant.json"
+bin/sshfling --json -t 1s \
+  --username s237guard >"$work/password-guard-grant.json"
+rm -f /etc/ssh/sshd_config.d/91-sshfling-password-s237guard.conf
+bin/sshfling --json -t 1s \
+  --username s239named >"$work/password-named-expired-grant.json"
+useradd --create-home --shell /bin/sh s238existing
+bin/sshfling --json -t 1s \
+  --username s238existing \
+  --allow-existing-user >"$work/password-existing-grant.json"
+python3 - "$work/password-active.json" "$work/password-expired-grant.json" "$work/password-prune-users.env" <<'PY'
+import json
+import sys
+
+active = json.load(open(sys.argv[1]))
+expired = json.load(open(sys.argv[2]))
+with open(sys.argv[3], "w") as out:
+    out.write(f"SSHPASS_ACTIVE={active['password']}\n")
+    out.write(f"SSHPASS_EXPIRED={expired['password']}\n")
+PY
+# shellcheck source=/dev/null
+source "$work/password-prune-users.env"
+
+log "password prune --username --delete-users protects active managed users"
+bin/sshfling --json password prune --username s235active --delete-users >"$work/password-prune-active-user.json"
+python3 - "$work/password-prune-active-user.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["count"] == 1
+result = payload["results"][0]
+assert result["username"] == "s235active", result
+assert result["status"] == "active", result
+assert "user" not in result, result
+assert "config" not in result, result
+assert "metadata" not in result, result
+PY
+id -u s235active >/dev/null
+test -e /etc/ssh/sshd_config.d/91-sshfling-password-s235active.conf
+test -e /var/lib/sshfling/password-grants/s235active.json
+
 sleep 2
+log "password prune --username --delete-users removes expired managed users"
+bin/sshfling --json password prune --username s239named --delete-users >"$work/password-prune-named-expired.json"
+python3 - "$work/password-prune-named-expired.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["count"] == 1
+result = payload["results"][0]
+assert result["username"] == "s239named", result
+assert result["status"] == "pruned", result
+assert result["config"]["removed"] is True, result
+assert result["metadata"]["removed"] is True, result
+assert result["user"]["deleted"] is True, result
+PY
+if id -u s239named >/dev/null 2>&1; then
+  fail "expired password prune --username did not delete s239named"
+fi
+test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s239named.conf
+test ! -e /var/lib/sshfling/password-grants/s239named.json
+sshd -t
+
 bin/sshfling --json password prune --all --delete-users >"$work/password-prune-all.json"
 python3 - "$work/password-prune-all.json" <<'PY'
 import json
@@ -436,16 +500,63 @@ assert expired["status"] == "pruned", by_user
 assert expired["config"]["removed"] is True, expired
 assert expired["metadata"]["removed"] is True, expired
 assert expired["user"]["deleted"] is True, expired
+guard = by_user["s237guard"]
+assert guard["status"] == "pruned", by_user
+assert guard["config"]["status"] == "missing", guard
+assert guard["metadata"]["removed"] is True, guard
+assert guard["user"]["deleted"] is True, guard
+existing = by_user["s238existing"]
+assert existing["status"] == "pruned", by_user
+assert existing["config"]["removed"] is True, existing
+assert existing["metadata"]["removed"] is True, existing
+assert existing["user"]["locked"] is True, existing
+assert existing["user"]["existing_user"] is True, existing
+assert existing["user"]["delete_skipped"] == "existing Unix user was not created by sshfling", existing
 PY
 id -u s235active >/dev/null
 if id -u s236expired >/dev/null 2>&1; then
   fail "expired password prune did not delete s236expired"
 fi
+if id -u s237guard >/dev/null 2>&1; then
+  fail "expired password prune with missing config did not delete s237guard"
+fi
+id -u s238existing >/dev/null
 test -e /etc/ssh/sshd_config.d/91-sshfling-password-s235active.conf
 test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s236expired.conf
+test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s237guard.conf
+test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s238existing.conf
 test -e /var/lib/sshfling/password-grants/s235active.json
 test ! -e /var/lib/sshfling/password-grants/s236expired.json
+test ! -e /var/lib/sshfling/password-grants/s237guard.json
+test ! -e /var/lib/sshfling/password-grants/s238existing.json
+grep -Eq '^s238existing:!' /etc/shadow
 sshd -t
+
+log "active password grant still authenticates after delete-users prune"
+SSHPASS="$SSHPASS_ACTIVE" sshpass -e bin/sshfling \
+  -p 2222 \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  s235active@127.0.0.1 \
+  'whoami' >"$work/password-active-after-prune.out"
+grep -q '^s235active$' "$work/password-active-after-prune.out"
+
+log "deleted expired password user cannot authenticate with old password"
+set +e
+SSHPASS="$SSHPASS_EXPIRED" sshpass -e bin/sshfling \
+  -p 2222 \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  s236expired@127.0.0.1 \
+  'whoami' >"$work/password-deleted-auth.out" 2>"$work/password-deleted-auth.err"
+password_deleted_code="$?"
+set -e
+if [[ "$password_deleted_code" -eq 0 ]]; then
+  fail "deleted expired password user authenticated with old password"
+fi
+if grep -q '^s236expired$' "$work/password-deleted-auth.out"; then
+  fail "deleted expired password user produced a successful whoami result"
+fi
 
 log "list and kill named sessions with max connections policy"
 for name in s101 s102 s103; do
@@ -724,7 +835,7 @@ assert "out" not in payload
 PY
 
 log "custom user-specific install policy caps default and requested time"
-bin/sshfling policy install --policy-file "$work/short-policy.json" --user root --max-time 45s --max-connections 2 >/dev/null
+bin/sshfling policy install --policy-file "$work/short-policy.json" --user root --max-time 45s --max-connections 2 --access-level admin >/dev/null
 set +e
 bin/sshfling --policy-file "$work/short-policy.json" \
   --certificate \
@@ -806,6 +917,142 @@ test ! -e /etc/ssh/sshd_config.d/90-sshfling-temp-access.conf
 test ! -e /etc/ssh/auth_principals/sshflingtmp
 test -e /etc/ssh/sshfling_user_ca.pub
 test -e /usr/local/libexec/sshfling-session
+sshd -t
+
+log "removed certificate host config denies the old certificate"
+kill "$sshd_pid"
+wait "$sshd_pid" 2>/dev/null || true
+/usr/sbin/sshd -D -e -p 2222 >"$work/sshd-uninstalled.log" 2>&1 &
+sshd_pid="$!"
+sleep 0.5
+set +e
+ssh \
+  -i "$CREATED_KEY" \
+  -o "CertificateFile=$CREATED_CERT" \
+  -o "BatchMode=yes" \
+  -o "PreferredAuthentications=publickey" \
+  -o "PasswordAuthentication=no" \
+  -o "NumberOfPasswordPrompts=0" \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  -p 2222 \
+  sshflingtmp@127.0.0.1 'whoami' >"$work/uninstalled-auth.out" 2>"$work/uninstalled-auth.err"
+uninstalled_auth_code="$?"
+set -e
+if [[ "$uninstalled_auth_code" -eq 0 ]]; then
+  fail "certificate login succeeded after host uninstall removed managed config"
+fi
+if grep -q '^sshflingtmp$' "$work/uninstalled-auth.out"; then
+  fail "uninstalled certificate host config produced a successful whoami result"
+fi
+
+log "failed certificate host reinstall rolls back files and created user"
+printf 'original host config\n' >"$work/revert-unincluded.conf"
+set +e
+bin/sshfling --json host install \
+  --ca-pub "$work/ca_user_ed25519.pub" \
+  --trusted-ca "$work/revert-ca.pub" \
+  --principals-dir "$work/revert-principals" \
+  --session-wrapper "$work/revert-wrapper" \
+  --sshd-config "$work/revert-unincluded.conf" \
+  --policy-file "$work/revert-policy.json" \
+  --username sshflingrevert \
+  --principal sshflingrevert \
+  --max-time 30s \
+  --create-user >"$work/host-revert.json" 2>"$work/host-revert.err"
+host_revert_code="$?"
+set -e
+if [[ "$host_revert_code" -eq 0 ]]; then
+  fail "expected host install validation failure to trigger rollback"
+fi
+python3 - "$work/host-revert.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is False, payload
+error = payload["error"]
+assert "not active" in error["message"], error
+rollback = error["details"].get("rollback")
+assert rollback, error
+paths = {item.get("path"): item for item in rollback if "path" in item}
+assert paths, rollback
+PY
+grep -Fxq "original host config" "$work/revert-unincluded.conf"
+test ! -e "$work/revert-ca.pub"
+test ! -e "$work/revert-principals/sshflingrevert"
+test ! -e "$work/revert-wrapper"
+test ! -e "$work/revert-policy.json"
+if id -u sshflingrevert >/dev/null 2>&1; then
+  fail "host install rollback did not delete created sshflingrevert user"
+fi
+sshd -t
+
+log "certificate host config can be reinstalled after uninstall"
+bin/sshfling host install \
+  --ca-pub "$work/ca_user_ed25519.pub" \
+  --username sshflingtmp \
+  --principal sshflingtmp \
+  --create-user \
+  --no-validate
+sshd -t
+kill "$sshd_pid"
+wait "$sshd_pid" 2>/dev/null || true
+/usr/sbin/sshd -D -e -p 2222 >"$work/sshd-reinstalled.log" 2>&1 &
+sshd_pid="$!"
+sleep 0.5
+
+bin/sshfling --json --certificate -t 20s \
+  --ca-key "$work/ca_user_ed25519" \
+  --username sshflingtmp >"$work/reinstalled-setup.json"
+python3 - "$work/reinstalled-setup.json" "$work/reinstalled.env" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+with open(sys.argv[2], "w") as out:
+    out.write(f"REINSTALLED_KEY={payload['private_key']}\n")
+    out.write(f"REINSTALLED_CERT={payload['out']}\n")
+PY
+# shellcheck source=/dev/null
+source "$work/reinstalled.env"
+
+ssh \
+  -i "$REINSTALLED_KEY" \
+  -o "CertificateFile=$REINSTALLED_CERT" \
+  -o "BatchMode=yes" \
+  -o "StrictHostKeyChecking=yes" \
+  -o "UserKnownHostsFile=$work/known_hosts" \
+  -p 2222 \
+  sshflingtmp@127.0.0.1 'whoami' >"$work/reinstalled-whoami.out"
+grep -q '^sshflingtmp$' "$work/reinstalled-whoami.out"
+
+log "host uninstall can remove shared certificate assets and generated user"
+bin/sshfling --json host uninstall \
+  --username sshflingtmp \
+  --principal sshflingtmp \
+  --remove-ca \
+  --remove-wrapper \
+  --delete-user \
+  --no-validate >"$work/host-final-uninstall.json"
+python3 - "$work/host-final-uninstall.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+paths = {item.get("path"): item for item in payload["results"] if "path" in item}
+assert paths["/etc/ssh/sshd_config.d/90-sshfling-temp-access.conf"]["removed"] is True
+assert paths["/etc/ssh/auth_principals/sshflingtmp"]["removed"] is True
+assert paths["/etc/ssh/sshfling_user_ca.pub"]["removed"] is True
+assert paths["/usr/local/libexec/sshfling-session"]["removed"] is True
+users = {item.get("user"): item for item in payload["results"] if "user" in item}
+assert users["sshflingtmp"]["deleted"] is True
+PY
+test ! -e /etc/ssh/sshd_config.d/90-sshfling-temp-access.conf
+test ! -e /etc/ssh/auth_principals/sshflingtmp
+test ! -e /etc/ssh/sshfling_user_ca.pub
+test ! -e /usr/local/libexec/sshfling-session
+if id -u sshflingtmp >/dev/null 2>&1; then
+  fail "host uninstall --delete-user did not delete sshflingtmp"
+fi
 sshd -t
 
 log "all docker integration checks passed"

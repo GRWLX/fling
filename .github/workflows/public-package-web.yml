@@ -32,6 +32,7 @@ jobs:
   linux:
     name: Linux packages
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -81,6 +82,7 @@ jobs:
   macos:
     name: macOS package
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -109,6 +111,7 @@ jobs:
   windows:
     name: Windows package
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -146,11 +149,14 @@ jobs:
   package-web:
     name: Verify package web
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
       attestations: write
       artifact-metadata: write
+    outputs:
+      publish: ${{ steps.package_site_mode.outputs.publish }}
     needs:
       - linux
       - macos
@@ -164,31 +170,55 @@ jobs:
           path: package-dist
           merge-multiple: true
 
-      - name: Validate repository signing configuration
+      - name: Resolve package site publishing mode
+        id: package_site_mode
         env:
           HAS_REPO_GPG_PRIVATE_KEY: ${{ secrets.SSHFLING_REPO_GPG_PRIVATE_KEY != '' }}
           HAS_REPO_GPG_FINGERPRINT: ${{ secrets.SSHFLING_REPO_GPG_FINGERPRINT != '' }}
           GENERATE_TEST_SIGNING_KEY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.generate_test_signing_key == 'true' }}
-          PUBLISH_PACKAGE_SITE: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
+          INPUT_PUBLISH: ${{ github.event.inputs.publish || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
-          if [[ "$PUBLISH_PACKAGE_SITE" == "true" && "$REF_TYPE" != "tag" ]]; then
+          requested_publish=false
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            requested_publish=true
+          elif [[ "$INPUT_PUBLISH" == "true" ]]; then
+            requested_publish=true
+          fi
+
+          publish=false
+          require_repo_signatures=false
+          if [[ "$requested_publish" == "true" && "$REF_TYPE" != "tag" ]]; then
             echo "Package site publishing is only allowed from a protected version tag." >&2
             exit 2
           fi
-          if [[ "$PUBLISH_PACKAGE_SITE" == "true" && "$HAS_REPO_GPG_PRIVATE_KEY" != "true" ]]; then
+          if [[ "$requested_publish" == "true" && "$HAS_REPO_GPG_PRIVATE_KEY" == "true" && "$HAS_REPO_GPG_FINGERPRINT" == "true" ]]; then
+            publish=true
+            require_repo_signatures=true
+          elif [[ "$requested_publish" == "true" && "$EVENT_NAME" == "push" ]]; then
+            {
+              echo "Package site publishing skipped."
+              echo
+              echo "A tag push requested package site publishing, but repository signing secrets are not configured."
+              echo "The workflow will still build and verify the package site as a dry run."
+            } >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$requested_publish" == "true" && "$EVENT_NAME" == "workflow_dispatch" && "$HAS_REPO_GPG_PRIVATE_KEY" != "true" ]]; then
             echo "Package site publishing requires SSHFLING_REPO_GPG_PRIVATE_KEY for stable repository signing." >&2
             exit 2
           fi
-          if [[ "$PUBLISH_PACKAGE_SITE" == "true" && "$HAS_REPO_GPG_FINGERPRINT" != "true" ]]; then
+          if [[ "$requested_publish" == "true" && "$EVENT_NAME" == "workflow_dispatch" && "$HAS_REPO_GPG_FINGERPRINT" != "true" ]]; then
             echo "Package site publishing requires SSHFLING_REPO_GPG_FINGERPRINT as the approved public trust anchor." >&2
             exit 2
           fi
-          if [[ "$PUBLISH_PACKAGE_SITE" == "true" && "$GENERATE_TEST_SIGNING_KEY" == "true" ]]; then
+          if [[ "$publish" == "true" && "$GENERATE_TEST_SIGNING_KEY" == "true" ]]; then
             echo "Ephemeral repository signing keys are not allowed for package site publishing." >&2
             exit 2
           fi
+          echo "publish=$publish" >>"$GITHUB_OUTPUT"
+          echo "require_repo_signatures=$require_repo_signatures" >>"$GITHUB_OUTPUT"
+          echo "generate_test_signing_key=$GENERATE_TEST_SIGNING_KEY" >>"$GITHUB_OUTPUT"
 
       - name: Install repository tools
         run: |
@@ -204,8 +234,8 @@ jobs:
           SSHFLING_REPO_GPG_KEY_ID: ${{ secrets.SSHFLING_REPO_GPG_KEY_ID }}
           SSHFLING_REPO_GPG_FINGERPRINT: ${{ secrets.SSHFLING_REPO_GPG_FINGERPRINT }}
           SSHFLING_REPO_GPG_PASSPHRASE: ${{ secrets.SSHFLING_REPO_GPG_PASSPHRASE }}
-          SSHFLING_GENERATE_REPO_SIGNING_KEY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.generate_test_signing_key == 'true' && '1' || '' }}
-          REQUIRE_REPO_SIGNATURES: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
+          SSHFLING_GENERATE_REPO_SIGNING_KEY: ${{ steps.package_site_mode.outputs.generate_test_signing_key == 'true' && '1' || '' }}
+          REQUIRE_REPO_SIGNATURES: ${{ steps.package_site_mode.outputs.require_repo_signatures }}
         run: |
           bash packaging/build-public-web.sh package-dist public
           bash packaging/verify-public-web.sh public
@@ -236,7 +266,7 @@ jobs:
 
       - name: Generate and validate package site evidence gate
         env:
-          REQUIRE_REPO_SIGNATURES: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
+          REQUIRE_REPO_SIGNATURES: ${{ steps.package_site_mode.outputs.require_repo_signatures }}
         run: |
           set -euo pipefail
           python3 tools/generate_release_evidence.py \
@@ -262,7 +292,7 @@ jobs:
           find public -type f -print0 | sort -z | xargs -0 sha256sum >"$RUNNER_TEMP/package-site-subjects.sha256"
 
       - name: Attest package site provenance
-        if: github.ref_type == 'tag' && (github.event_name == 'push' || github.event.inputs.publish == 'true')
+        if: steps.package_site_mode.outputs.publish == 'true'
         uses: actions/attest@v4
         with:
           subject-checksums: ${{ runner.temp }}/package-site-subjects.sha256
@@ -277,8 +307,9 @@ jobs:
 
   deploy-pages:
     name: Deploy package web
-    if: github.ref_type == 'tag' && (github.event_name == 'push' || github.event.inputs.publish == 'true')
+    if: needs.package-web.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write

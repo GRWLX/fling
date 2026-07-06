@@ -10,6 +10,11 @@ This guide supports control evidence for SOC 2, ISO 27001:2022, and NIST SP
 and does not prove compliance by itself. Treat it as an evidence map for release
 operators and auditors.
 
+Detailed framework mapping, CIS-style hardening expectations, and caveats are
+maintained in [Compliance Mapping](../compliance-mapping.md). The repository
+threat assumptions and residual risks are maintained in
+[SSHFling Threat Model](../threat-model.md).
+
 | Control area | SOC 2 | ISO 27001:2022 | NIST SP 800-53 Rev. 5 |
 | --- | --- | --- | --- |
 | Release authorization and change traceability | CC8.1 | A.8.32 | CM-3, CM-5 |
@@ -22,6 +27,10 @@ operators and auditors.
 
 SSHFling uses standard OpenSSH on target hosts. It does not require an AI CLI,
 agent, SDK, model runtime, or vendor daemon on the server.
+
+SSHFling does not vendor, fork, pin, upgrade, or remove OpenSSH. Dependency
+ownership, version selection, uninstall behavior, and original-state evidence
+are documented in [OpenSSH Dependency Policy](../openssh-dependencies.md).
 
 Package publishing must preserve that trust model:
 
@@ -95,10 +104,14 @@ For production hosts:
 - Treat password grants as the default access path and manage them with short
   lifetimes, named temporary users, prune automation, and host audit controls.
 - Use certificate mode explicitly when policy forbids temporary local passwords
-  or when the target platform is not a supported Linux password host.
+  or when the target platform is not a validated Linux password host.
 - Treat certificate-specific setup options as certificate-only. The CLI rejects
   options such as `--ca-key`, `--public-key-file`, `--out`, `--login-user`, and
   `--source-address` unless `--certificate` is present.
+- Treat `access_level` as a policy classification for least-privilege review,
+  not as privilege assignment. Host IAM, sudoers, PAM, AD, MDM, groups, local
+  administrator membership, and service-manager policy remain the enforcement
+  layer for actual account privileges.
 - Treat `sshfling password prune` as expired-grant cleanup, not as a broad user
   deletion command. It skips active grants, skips unmanaged records, locks
   expired SSHFling-created users by default, deletes those users only with
@@ -148,6 +161,8 @@ Release evidence should include:
 - Checksums URL.
 - Repository signing key fingerprint.
 - Validation workflow results.
+- Runtime behavior evidence for password default, explicit certificate mode,
+  access-level classification, prune limits, and uninstall limits.
 - Known exceptions and approvals.
 
 ## Issuer Service Controls
@@ -175,6 +190,8 @@ Use these questions in release review:
 - Are Apple and Windows signing requirements satisfied or explicitly waived?
 - Are license and redistribution approvals recorded?
 - Are release artifacts traceable to a reviewed commit?
+- Are threat-model assumptions, OpenSSH dependency ownership, and platform
+  coverage claims still accurate for this release?
 - Are install and uninstall docs current?
 - Are package-site verification and cross-OS validation results attached?
 - Are host policy and issuer secrets managed outside ad hoc manual edits?
