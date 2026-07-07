@@ -9,6 +9,70 @@ dist_dir="$repo_root/dist"
 topdir="$repo_root/build/rpm"
 payload="$topdir/payload"
 
+export LC_ALL=C
+export TZ=UTC
+umask 022
+
+source_date_epoch="${SOURCE_DATE_EPOCH:-}"
+if [[ -z "$source_date_epoch" ]]; then
+  source_date_epoch="$(git -C "$repo_root" log -1 --format=%ct HEAD 2>/dev/null || printf '1700000000')"
+fi
+if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be an integer Unix timestamp." >&2
+  exit 2
+fi
+export SOURCE_DATE_EPOCH="$source_date_epoch"
+
+normalize_tree_timestamps() {
+  local path="$1"
+
+  find "$path" -exec touch -h -d "@$source_date_epoch" {} +
+}
+
+assert_rpm_payload_assets() {
+  local actual
+  local expected
+
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  find "$payload" -type f -printf '%m %P\n' | sort -k2,2 >"$actual"
+  cat >"$expected" <<'ASSETS'
+644 etc/sshfling/policy.json
+640 etc/sshfling/sshflingd.env
+755 usr/bin/sshfling
+644 usr/lib/systemd/system/sshflingd.service
+644 usr/share/doc/sshfling/LICENSE
+644 usr/share/doc/sshfling/README.md
+644 usr/share/doc/sshfling/sshflingd.env.example
+644 usr/share/sshfling/templates/.env.example
+644 usr/share/sshfling/templates/LICENSE
+644 usr/share/sshfling/templates/README.md
+644 usr/share/sshfling/templates/compose.client.yml
+644 usr/share/sshfling/templates/compose.server.yml
+755 usr/share/sshfling/templates/production/sshfling-session
+755 usr/share/sshfling/templates/scripts/create-network.sh
+755 usr/share/sshfling/templates/scripts/generate-ssh-key.sh
+755 usr/share/sshfling/templates/scripts/install-local.sh
+755 usr/share/sshfling/templates/scripts/uninstall-local.sh
+644 usr/share/sshfling/templates/secrets/.gitkeep
+644 usr/share/sshfling/templates/ssh-client/Dockerfile
+755 usr/share/sshfling/templates/ssh-client/entrypoint.sh
+644 usr/share/sshfling/templates/ssh-server/Dockerfile
+755 usr/share/sshfling/templates/ssh-server/entrypoint.sh
+755 usr/share/sshfling/templates/ssh-server/limited-session.sh
+644 usr/share/sshfling/templates/ssh-server/sshd_config
+644 usr/share/sshfling/templates/systemd/sshflingd.env.example
+644 usr/share/sshfling/templates/systemd/sshflingd.service
+ASSETS
+  sort -k2,2 "$expected" -o "$expected"
+  if ! diff -u "$expected" "$actual" >&2; then
+    echo "sshfling: RPM payload asset list changed unexpectedly" >&2
+    rm -f "$actual" "$expected"
+    exit 1
+  fi
+  rm -f "$actual" "$expected"
+}
+
 if ! command -v rpmbuild >/dev/null 2>&1; then
   echo "rpmbuild is required to build an RPM package." >&2
   exit 127
@@ -31,7 +95,19 @@ install -m 0644 "$repo_root/LICENSE" "$payload/usr/share/doc/sshfling/LICENSE"
 install -m 0644 "$repo_root/systemd/sshflingd.env.example" "$payload/usr/share/doc/sshfling/sshflingd.env.example"
 install -m 0644 "$repo_root/systemd/sshflingd.service" "$payload/usr/lib/systemd/system/sshflingd.service"
 
-tar -C "$payload" -czf "$topdir/SOURCES/sshfling-files-${version}.tar.gz" .
+assert_rpm_payload_assets
+normalize_tree_timestamps "$payload"
+
+tar \
+  --sort=name \
+  --mtime="@$source_date_epoch" \
+  --owner=0 \
+  --group=0 \
+  --numeric-owner \
+  --use-compress-program="gzip -n" \
+  -C "$payload" \
+  -cf "$topdir/SOURCES/sshfling-files-${version}.tar.gz" \
+  .
 
 cat >"$topdir/SPECS/sshfling.spec" <<SPEC
 Name: sshfling
@@ -85,11 +161,25 @@ user_exists() {
   fi
 }
 
-record_install_state() {
-  if [ -f "\$state_file" ]; then
-    return 0
-  fi
+ensure_package_dir() {
+  dir_path=\$1
+  dir_mode=\$2
+  dir_owner=\$3
+  dir_group=\$4
 
+  if [ -L "\$dir_path" ] || { [ -e "\$dir_path" ] && [ ! -d "\$dir_path" ]; }; then
+    echo "sshfling: refusing to manage unsafe package directory \$dir_path" >&2
+    exit 1
+  fi
+  install -d -m "\$dir_mode" -o "\$dir_owner" -g "\$dir_group" "\$dir_path"
+}
+
+ensure_package_state_dir() {
+  ensure_package_dir "\$state_root" 0750 root root
+  ensure_package_dir "\$state_dir" 0700 root root
+}
+
+record_install_state() {
   group_preexisting=no
   user_preexisting=no
   var_dir_preexisting=no
@@ -103,8 +193,15 @@ record_install_state() {
     var_dir_preexisting=yes
   fi
 
-  install -d -m 0750 -o root -g root "\$state_root"
-  install -d -m 0700 -o root -g root "\$state_dir"
+  ensure_package_state_dir
+  if [ -e "\$state_file" ] || [ -L "\$state_file" ]; then
+    if [ -f "\$state_file" ] && [ ! -L "\$state_file" ]; then
+      return 0
+    fi
+    echo "sshfling: refusing to use unsafe install state \$state_file" >&2
+    exit 1
+  fi
+
   {
     echo "group_preexisting=\$group_preexisting"
     echo "user_preexisting=\$user_preexisting"
@@ -133,8 +230,21 @@ exit 0
 %post
 set -e
 
-install -d -m 0750 -o root -g sshflingd /etc/sshfling
-install -d -m 0750 -o sshflingd -g sshflingd /var/lib/sshflingd
+ensure_package_dir() {
+  dir_path=\$1
+  dir_mode=\$2
+  dir_owner=\$3
+  dir_group=\$4
+
+  if [ -L "\$dir_path" ] || { [ -e "\$dir_path" ] && [ ! -d "\$dir_path" ]; }; then
+    echo "sshfling: refusing to manage unsafe package directory \$dir_path" >&2
+    exit 1
+  fi
+  install -d -m "\$dir_mode" -o "\$dir_owner" -g "\$dir_group" "\$dir_path"
+}
+
+ensure_package_dir /etc/sshfling 0750 root sshflingd
+ensure_package_dir /var/lib/sshflingd 0750 sshflingd sshflingd
 if [ -f /etc/sshfling/policy.json ] && [ ! -L /etc/sshfling/policy.json ]; then
   chown root:root /etc/sshfling/policy.json
   chmod 0644 /etc/sshfling/policy.json
@@ -155,15 +265,32 @@ set -e
 state_root=/var/lib/sshfling
 preserve_dir=\$state_root/rpm-preserve-config
 
-if [ "\$1" -eq 0 ]; then
+ensure_package_state_root() {
+  if [ -L "\$state_root" ] || { [ -e "\$state_root" ] && [ ! -d "\$state_root" ]; }; then
+    echo "sshfling: refusing to manage unsafe package state root \$state_root" >&2
+    exit 1
+  fi
   install -d -m 0750 -o root -g root "\$state_root"
-  rm -rf "\$preserve_dir"
+}
+
+if [ "\$1" -eq 0 ]; then
+  preserved_config=no
+  ensure_package_state_root
+  if [ -L "\$preserve_dir" ]; then
+    rm -f "\$preserve_dir"
+  else
+    rm -rf "\$preserve_dir"
+  fi
   install -d -m 0700 -o root -g root "\$preserve_dir"
   for path in /etc/sshfling/policy.json /etc/sshfling/sshflingd.env; do
     if [ -f "\$path" ] && [ ! -L "\$path" ]; then
       cp -p "\$path" "\$preserve_dir/\$(basename "\$path")"
+      preserved_config=yes
     fi
   done
+  if [ "\$preserved_config" != "yes" ]; then
+    rmdir "\$preserve_dir" 2>/dev/null || true
+  fi
 fi
 
 if [ "\$1" -eq 0 ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -232,6 +359,11 @@ var_lib_is_empty() {
 }
 
 read_install_state() {
+  if [ -L "\$state_root" ] || [ -L "\$state_dir" ]; then
+    echo "sshfling: ignoring symlinked package state directory" >&2
+    return 0
+  fi
+
   if [ ! -f "\$state_file" ] || [ -L "\$state_file" ]; then
     return 0
   fi
@@ -264,7 +396,29 @@ read_install_state() {
 }
 
 remove_package_state() {
-  rm -rf "\$state_dir" "\$preserve_dir"
+  if [ -L "\$state_root" ]; then
+    echo "sshfling: not removing symlinked package state root \$state_root" >&2
+    return 0
+  fi
+  if [ -L "\$state_dir" ]; then
+    rm -f "\$state_dir"
+  else
+    rm -rf "\$state_dir"
+  fi
+  if [ -L "\$preserve_dir" ]; then
+    rm -f "\$preserve_dir"
+  else
+    rm -rf "\$preserve_dir"
+  fi
+  rmdir "\$state_root" 2>/dev/null || true
+}
+
+remove_preserve_state() {
+  if [ -L "\$preserve_dir" ]; then
+    rm -f "\$preserve_dir"
+  else
+    rm -rf "\$preserve_dir"
+  fi
   rmdir "\$state_root" 2>/dev/null || true
 }
 
@@ -278,9 +432,14 @@ remove_created_account_if_safe() {
   if [ "\${var_dir_preexisting:-yes}" = "no" ] && var_lib_is_empty; then
     rmdir /var/lib/sshflingd 2>/dev/null || true
   fi
-  remove_package_state
 
-  if [ -d /etc/sshfling ] || [ -d /var/lib/sshflingd ]; then
+  if [ -d /etc/sshfling ]; then
+    remove_preserve_state
+    return 0
+  fi
+
+  if [ "\${var_dir_preexisting:-yes}" = "no" ] && [ -d /var/lib/sshflingd ]; then
+    remove_preserve_state
     return 0
   fi
 
@@ -291,9 +450,11 @@ remove_created_account_if_safe() {
   if [ "\${group_preexisting:-yes}" = "no" ] && group_exists && ! user_exists; then
     groupdel sshflingd >/dev/null 2>&1 || true
   fi
+
+  remove_package_state
 }
 
-if [ "\$1" -eq 0 ] && [ -d "\$preserve_dir" ]; then
+if [ "\$1" -eq 0 ] && [ ! -L "\$state_root" ] && [ ! -L "\$preserve_dir" ] && [ -d "\$preserve_dir" ]; then
   install -d -m 0750 /etc/sshfling
   if getent group sshflingd >/dev/null 2>&1; then
     chown root:sshflingd /etc/sshfling 2>/dev/null || true
@@ -335,8 +496,22 @@ exit 0
 - Initial package
 SPEC
 
-rpmbuild --define "_topdir $topdir" -bb "$topdir/SPECS/sshfling.spec"
+rpmbuild \
+  --define "_topdir $topdir" \
+  --define "_build_id_links none" \
+  --define "_buildhost sshfling-build.local" \
+  --define "use_source_date_epoch_as_buildtime 1" \
+  --define "clamp_mtime_to_source_date_epoch 1" \
+  -bb "$topdir/SPECS/sshfling.spec"
 
 install -d "$dist_dir"
-find "$topdir/RPMS" -type f -name "sshfling-${version}-*.rpm" -exec cp {} "$dist_dir/" \;
-find "$dist_dir" -type f -name "sshfling-${version}-*.rpm" -print
+mapfile -t built_rpms < <(find "$topdir/RPMS" -type f -name "sshfling-${version}-*.rpm" | sort)
+if ((${#built_rpms[@]} != 1)); then
+  printf 'Expected exactly one built RPM for version %s, found %s.\n' "$version" "${#built_rpms[@]}" >&2
+  printf '%s\n' "${built_rpms[@]}" >&2
+  exit 1
+fi
+rpm_name="$(basename "${built_rpms[0]}")"
+rm -f "$dist_dir"/sshfling-"$version"-*.rpm
+cp "${built_rpms[0]}" "$dist_dir/$rpm_name"
+printf '%s\n' "$dist_dir/$rpm_name"

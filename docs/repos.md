@@ -5,7 +5,7 @@ The repo includes two GitHub Actions release paths:
 - `Release packages without web` builds `.deb`, `.rpm`, `.msi`, `.pkg`, a source tarball, and release checksums.
 - `Release packages with public web` builds the same package set and publishes a GitHub Pages package site with APT, RPM, Homebrew, macOS pkg, Windows MSI, and community package manifests for additional ecosystems.
 
-For public installs, enable GitHub Pages for Actions in the repository settings and run the `Release packages with public web` workflow from a version tag such as `v0.1.12`.
+For public installs, enable GitHub Pages for Actions in the repository settings and run the `Release packages with public web` workflow from a version tag such as `v0.1.13`.
 
 Replace `OWNER` and `REPO` in the examples below with the GitHub organization/user and repository name.
 
@@ -333,7 +333,7 @@ dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
 For local smoke tests from the source checkout root, install the package file directly:
 
 ```bash
-sudo apt install ./dist/sshfling_0.1.12_all.deb
+sudo apt install ./dist/sshfling_0.1.13_all.deb
 ```
 
 For client repo registration, sign the repo metadata with GPG, publish the public key, and use an APT source with `signed-by=`.
@@ -351,7 +351,7 @@ createrepo_c repo/rpm
 For local smoke tests from the source checkout root, install the package file directly:
 
 ```bash
-sudo dnf install ./dist/sshfling-0.1.12-1.noarch.rpm
+sudo dnf install ./dist/sshfling-0.1.13-1.noarch.rpm
 ```
 
 For client repo registration, sign RPMs and repo metadata, publish the public key, and use a Yum/DNF repo with `gpgcheck=1` and `repo_gpgcheck=1`.
@@ -361,7 +361,7 @@ For client repo registration, sign RPMs and repo metadata, publish the public ke
 For direct `.pkg` distribution:
 
 ```bash
-sudo installer -pkg dist/sshfling-0.1.12.pkg -target /
+sudo installer -pkg dist/sshfling-0.1.13.pkg -target /
 ```
 
 For Homebrew distribution, publish a source tarball and add a formula to a tap:
@@ -370,7 +370,7 @@ For Homebrew distribution, publish a source tarball and add a formula to a tap:
 class Sshfling < Formula
   desc "Temporary SSH access CLI with password grants and optional certificates"
   homepage "https://example.com/sshfling"
-  url "https://example.com/sshfling-0.1.12.tar.gz"
+  url "https://example.com/sshfling-0.1.13.tar.gz"
   sha256 "REPLACE_WITH_SHA256"
   license :cannot_represent
 
@@ -422,7 +422,7 @@ MSI files are not installed from APT/YUM-style repos. Common registration paths:
 Silent install:
 
 ```powershell
-msiexec /i sshfling-0.1.12.msi /qn
+msiexec /i sshfling-0.1.13.msi /qn
 ```
 
 For production, sign the MSI with an Authenticode certificate.
@@ -430,7 +430,7 @@ For production, sign the MSI with an Authenticode certificate.
 Silent uninstall:
 
 ```powershell
-msiexec /x sshfling-0.1.12.msi /qn /norestart
+msiexec /x sshfling-0.1.13.msi /qn /norestart
 ```
 
 MSI uninstall removes files and installer-managed PATH state only. It does not

@@ -24,7 +24,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "0.1.12"
+VERSION = "0.1.13"
 DEFAULT_NETWORK = "timed-ssh-net"
 DEFAULT_SESSION_WRAPPER = "/usr/local/libexec/sshfling-session"
 DEFAULT_ISSUER_LISTEN = "127.0.0.1:8787"
@@ -764,6 +764,25 @@ def access_level_help():
     return "Privilege classification only; does not grant OS sudo/root rights. Values: standard, operator, sudo-limited, admin/root-equivalent."
 
 
+def access_level_label(value):
+    normalized = normalize_access_level(value)
+    if normalized == "admin":
+        return "admin/root-equivalent"
+    return normalized
+
+
+def access_level_select_options(selected=None, include_preserve=False):
+    selected = normalize_access_level(selected) if selected else None
+    options = []
+    if include_preserve:
+        options.append('<option value="">Preserve current</option>')
+    for name in ACCESS_LEVEL_ORDER:
+        selected_attr = " selected" if name == selected else ""
+        label = access_level_label(name)
+        options.append(f'<option value="{html.escape(name)}"{selected_attr}>{html.escape(label)}</option>')
+    return "\n".join(options)
+
+
 def validate_policy_values(max_time_seconds, max_connections, access_level=None):
     if max_time_seconds < 1:
         raise SSHFlingError("Maximum time must be positive.", 2)
@@ -1035,6 +1054,8 @@ def cmd_policy_install(args):
 
 
 def cmd_cert_issue(args):
+    if not getattr(args, "certificate", False):
+        raise SSHFlingError("Certificate issuance requires --certificate.", 2)
     require_root("cert issue")
     public_key_text = read_text_source(args.public_key, args.public_key_file, "public-key")
     seconds = lifetime_seconds(args)
@@ -2691,8 +2712,11 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
             )
             continue
         try:
-            expires_at = int(metadata.get("expires_at", 0))
-        except (TypeError, ValueError):
+            expires_at = int(metadata["expires_at"])
+        except (KeyError, TypeError, ValueError):
+            results.append({"metadata_path": str(path), "username": grant_username, "status": "skipped-invalid-metadata"})
+            continue
+        if expires_at < 1:
             results.append({"metadata_path": str(path), "username": grant_username, "status": "skipped-invalid-metadata"})
             continue
         if expires_at > now:
@@ -2795,6 +2819,7 @@ Match User {args.user}
 
     rollback_paths = [wrapper_path, trusted_ca, principals_file, sshd_config]
     requested_access_level = getattr(args, "access_level", None)
+    installed_access_level = None
     if args.max_time or args.max_connections or requested_access_level:
         rollback_paths.append(policy_file_path(args.policy_file))
     rollback_snapshots = [] if args.dry_run else [(path, snapshot_file(path)) for path in rollback_paths]
@@ -2813,6 +2838,7 @@ Match User {args.user}
             max_connections = args.max_connections if args.max_connections else current_user_policy["max_connections"]
             access_level = requested_access_level if requested_access_level else current_user_policy["access_level"]
             access_level = validate_access_level_for_username(args.user, access_level)
+            installed_access_level = access_level
             if args.dry_run:
                 results.append({
                     "path": str(policy_file_path(args.policy_file)),
@@ -2877,7 +2903,8 @@ Match User {args.user}
         principals_file=principals_file,
         sshd_config=sshd_config,
         session_wrapper=wrapper_path,
-        access_level=requested_access_level,
+        access_level=installed_access_level,
+        requested_access_level=requested_access_level,
         dry_run=args.dry_run,
         reload=args.reload,
     )
@@ -3015,6 +3042,7 @@ class IssuerHandler(http.server.BaseHTTPRequestHandler):
                 serial=result["serial"],
                 source_address=request.get("source_address"),
                 permit_pty=bool(request.get("permit_pty", True)),
+                access_level=result["access_level"],
             )
             self.send_json(200, result)
         except SSHFlingError as exc:
@@ -3164,7 +3192,7 @@ def render_web_page(title, body):
     h2 {{ margin: 0 0 12px; font-size: 15px; }}
     section, .login {{ background: white; border: 1px solid #d8e0e5; border-radius: 6px; padding: 16px; margin-bottom: 16px; }}
     label {{ display: block; font-weight: 600; margin: 10px 0 4px; }}
-    input {{ box-sizing: border-box; width: 100%; max-width: 320px; padding: 8px 10px; border: 1px solid #b8c4cc; border-radius: 4px; font: inherit; }}
+    input, select {{ box-sizing: border-box; width: 100%; max-width: 320px; padding: 8px 10px; border: 1px solid #b8c4cc; border-radius: 4px; font: inherit; }}
     button {{ padding: 8px 12px; border: 1px solid #172026; border-radius: 4px; background: #172026; color: white; font: inherit; cursor: pointer; }}
     button.secondary {{ background: white; color: #172026; }}
     table {{ width: 100%; border-collapse: collapse; }}
@@ -3208,9 +3236,9 @@ def render_dashboard(policy, sessions, csrf, message=""):
     user_rows = []
     for username, caps in sorted(policy.get("users", {}).items()):
         user_rows.append(
-            f"<tr><td>{html.escape(username)}</td><td>{format_duration(caps['max_time_seconds'])}</td><td>{caps['max_connections']}</td></tr>"
+            f"<tr><td>{html.escape(username)}</td><td>{format_duration(caps['max_time_seconds'])}</td><td>{caps['max_connections']}</td><td>{html.escape(access_level_label(caps['access_level']))}</td></tr>"
         )
-    user_table = "".join(user_rows) or "<tr><td colspan=\"3\">No user overrides</td></tr>"
+    user_table = "".join(user_rows) or "<tr><td colspan=\"4\">No user overrides</td></tr>"
 
     session_rows = []
     for session in sessions:
@@ -3233,8 +3261,8 @@ def render_dashboard(policy, sessions, csrf, message=""):
 <section>
   <h2>Policy</h2>
   <table>
-    <tr><th>User</th><th>Max Time</th><th>Max Connections</th></tr>
-    <tr><td>default</td><td>{format_duration(default_caps['max_time_seconds'])}</td><td>{default_caps['max_connections']}</td></tr>
+    <tr><th>User</th><th>Max Time</th><th>Max Connections</th><th>Access Level</th></tr>
+    <tr><td>default</td><td>{format_duration(default_caps['max_time_seconds'])}</td><td>{default_caps['max_connections']}</td><td>{html.escape(access_level_label(default_caps['access_level']))}</td></tr>
     {user_table}
   </table>
 </section>
@@ -3246,6 +3274,7 @@ def render_dashboard(policy, sessions, csrf, message=""):
       <div><label for="user">User</label><input id="user" name="user" placeholder="default"></div>
       <div><label for="max_time">Max Time</label><input id="max_time" name="max_time" value="{duration_input_value(default_caps['max_time_seconds'])}" required></div>
       <div><label for="max_connections">Max Connections</label><input id="max_connections" name="max_connections" type="number" min="1" max="10" value="{default_caps['max_connections']}" required></div>
+      <div><label for="access_level">Access Level</label><select id="access_level" name="access_level">{access_level_select_options(include_preserve=True)}</select></div>
       <button type="submit">Save</button>
     </div>
   </form>
@@ -3384,13 +3413,16 @@ class WebHandler(http.server.BaseHTTPRequestHandler):
                 user = form.get("user", "").strip() or None
                 max_time = duration_seconds(form.get("max_time", ""))
                 max_connections = positive_int(form.get("max_connections", ""))
-                write_policy(self.server.policy_file, max_time, max_connections, user)
+                access_level = form.get("access_level", "").strip() or None
+                policy = write_policy(self.server.policy_file, max_time, max_connections, user, access_level)
+                active = effective_policy(policy, user)
                 audit_log(
                     "web_policy_updated",
                     actor=payload.get("user"),
                     user=user or "default",
                     max_time_seconds=max_time,
                     max_connections=max_connections,
+                    access_level=active["access_level"],
                     remote_addr=remote_addr(self),
                 )
                 self.redirect("/?message=policy+saved")
@@ -3779,8 +3811,10 @@ def build_parser():
     ca_init.set_defaults(func=cmd_ca_init)
 
     cert = subparsers.add_parser("cert", help="Issue temporary SSH user certificates.")
+    cert.add_argument("--certificate", action="store_true", default=argparse.SUPPRESS, help="Explicitly allow certificate issuance.")
     cert_sub = cert.add_subparsers(dest="cert_command")
     cert_issue = cert_sub.add_parser("issue", help="Sign a public key for temporary SSH access.")
+    cert_issue.add_argument("--certificate", action="store_true", default=argparse.SUPPRESS, help="Explicitly allow certificate issuance.")
     cert_issue.add_argument("--ca-key", default=str(default_ca_key_path()), help="CA private key path.")
     cert_issue.add_argument("--public-key", help="Public key text to sign.")
     cert_issue.add_argument("--public-key-file", help="Public key file to sign.")

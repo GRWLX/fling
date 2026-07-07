@@ -56,4 +56,4 @@ remove_empty_dir "$template_dir/systemd"
 remove_empty_dir "$template_dir"
 remove_empty_dir "$prefix/share/sshfling"
 
-echo "Left dependencies and unmanaged files untouched."
+echo "Left dependencies and files outside SSHFling local-install paths untouched."

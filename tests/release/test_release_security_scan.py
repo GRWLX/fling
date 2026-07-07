@@ -24,14 +24,16 @@ class ReleaseSecurityScanTests(unittest.TestCase):
     def test_secret_scan_detects_high_confidence_patterns_without_raw_secret_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            token = "ghp_" + "AbCdEf0123456789" * 3
-            aws_key = "AKIA1234567890ABCDEF"
+            token = "gh" + "p_" + "AbCdEf0123456789" * 3
+            aws_key = "AK" + "IA" + "1234567890ABCDEF"
+            github_token_name = "GITHUB" + "_TOKEN"
+            aws_key_name = "AWS" + "_ACCESS_KEY_ID"
             path = write_file(
                 repo_root / "app.env",
                 "\n".join(
                     [
-                        f'GITHUB_TOKEN="{token}"',
-                        f"AWS_ACCESS_KEY_ID={aws_key}",
+                        f'{github_token_name}="{token}"',
+                        f"{aws_key_name}={aws_key}",
                         "SSHFLING_ISSUER_TOKEN=replace-with-a-long-random-token",
                         'DEFAULT_PASSWORD_GRANT_DIR="/var/lib/sshfling/password-grants"',
                     ]
@@ -55,9 +57,10 @@ class ReleaseSecurityScanTests(unittest.TestCase):
             tmp_path = Path(tmp)
             repo_root = tmp_path / "repo"
             repo_root.mkdir()
+            token = "gh" + "p_" + "AbCdEf0123456789GhIjKlMnOpQrStUvWxYz1234"
             outside_secret = write_file(
                 tmp_path / "outside.env",
-                "GITHUB_TOKEN=ghp_AbCdEf0123456789GhIjKlMnOpQrStUvWxYz1234\n",
+                f"GITHUB_TOKEN={token}\n",
             )
 
             with self.assertRaisesRegex(SystemExit, "release evidence path must stay inside repo"):

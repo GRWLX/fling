@@ -17,7 +17,7 @@ This runbook covers package release operations for SSHFling.
 2. Validate the version:
 
    ```bash
-   bash packaging/resolve-version.sh 0.1.12
+   bash packaging/resolve-version.sh 0.1.13
    ```
 
 3. Run local tests:
@@ -42,8 +42,8 @@ This runbook covers package release operations for SSHFling.
 8. Create and push the release tag:
 
    ```bash
-   git tag -a v0.1.12 -m "SSHFling 0.1.12"
-   git push origin v0.1.12
+   git tag -a v0.1.13 -m "SSHFling 0.1.13"
+   git push origin v0.1.13
    ```
 
 9. Watch the tag-triggered package workflows:
@@ -52,7 +52,7 @@ This runbook covers package release operations for SSHFling.
    - `Release packages with public web`
    - `pages-build-deployment`
 
-10. After Pages deploys, dispatch these workflows with version `0.1.12`:
+10. After Pages deploys, dispatch these workflows with version `0.1.13`:
 
    - `Package install tests`
    - `Cross OS validation`

@@ -31,6 +31,7 @@ $HelpUrl = "https://github.com/GRWLX/sshfling/issues"
 $PackageDescription = "Temporary SSH access broker and CLI"
 $UninstallScope = "Uninstall removes package files and PATH entry only; host SSH state, local policy, CA material, and dependencies are managed separately."
 $DependencyScope = "The MSI does not bundle or remove Python, OpenSSH, or Windows OpenSSH Server components."
+$WindowsStateScope = "The MSI does not create Windows services, scheduled tasks, or other Windows persistence entries."
 
 foreach ($tool in @("candle.exe", "light.exe", "heat.exe")) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
@@ -56,6 +57,7 @@ Runtime dependencies:
 Uninstall and revert scope:
 - MSI uninstall removes files under the SSHFling install directory and the PATH entry added by the MSI.
 - It does not remove Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, temporary grant state, CA material, or policy/configuration stored outside the install directory.
+- The MSI does not create Windows services, scheduled tasks, or other Windows persistence entries.
 - Exact preinstall state restoration must come from Intune, Group Policy, configuration management, backups, or another source of recorded original state.
 "@ | Set-Content -Encoding ASCII (Join-Path $ProductDir "PACKAGE-NOTES.txt")
 
@@ -123,6 +125,7 @@ heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg 
             <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="Version" Value="$Version" Type="string" />
             <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="UninstallScope" Value="$UninstallScope" Type="string" />
             <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="DependencyScope" Value="$DependencyScope" Type="string" />
+            <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="WindowsStateScope" Value="$WindowsStateScope" Type="string" />
             <Environment Id="PathSSHFling" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
           </Component>
         </Directory>
@@ -136,6 +139,15 @@ heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg 
   </Product>
 </Wix>
 "@ | Set-Content -Encoding UTF8 $Wxs
+
+foreach ($wixSource in @($Wxs, $HarvestedWxs)) {
+  $wixContent = Get-Content -Raw -Path $wixSource
+  foreach ($forbidden in @("ServiceInstall", "ServiceControl", "ScheduledTask", "CustomAction")) {
+    if ($wixContent -match "<\s*(?:[A-Za-z_][\w.-]*:)?$forbidden\b") {
+      throw "Unexpected WiX element <$forbidden> in $wixSource. MSI must not create services, scheduled tasks, or custom persistence actions."
+    }
+  }
+}
 
 candle.exe -nologo -dProductDir="$ProductDir" -out $WixObj $Wxs
 candle.exe -nologo -dProductDir="$ProductDir" -out $HarvestedObj $HarvestedWxs

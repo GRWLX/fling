@@ -8,6 +8,73 @@ version="$(assert_sshfling_version_matches_source "${SSHFLING_VERSION:-}" "$repo
 dist_dir="$repo_root/dist"
 stage="$repo_root/build/deb/sshfling_${version}_all"
 
+export LC_ALL=C
+export TZ=UTC
+umask 022
+
+source_date_epoch="${SOURCE_DATE_EPOCH:-}"
+if [[ -z "$source_date_epoch" ]]; then
+  source_date_epoch="$(git -C "$repo_root" log -1 --format=%ct HEAD 2>/dev/null || printf '1700000000')"
+fi
+if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+  echo "SOURCE_DATE_EPOCH must be an integer Unix timestamp." >&2
+  exit 2
+fi
+export SOURCE_DATE_EPOCH="$source_date_epoch"
+
+normalize_tree_timestamps() {
+  local path="$1"
+
+  find "$path" -exec touch -h -d "@$source_date_epoch" {} +
+}
+
+assert_deb_payload_assets() {
+  local actual
+  local expected
+
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  find "$stage" \
+    -path "$stage/DEBIAN" -prune -o \
+    -type f -printf '%m %P\n' |
+    sort -k2,2 >"$actual"
+  cat >"$expected" <<'ASSETS'
+644 etc/sshfling/policy.json
+640 etc/sshfling/sshflingd.env
+644 lib/systemd/system/sshflingd.service
+755 usr/bin/sshfling
+644 usr/share/doc/sshfling/LICENSE
+644 usr/share/doc/sshfling/README.md
+644 usr/share/doc/sshfling/sshflingd.env.example
+644 usr/share/sshfling/templates/.env.example
+644 usr/share/sshfling/templates/LICENSE
+644 usr/share/sshfling/templates/README.md
+644 usr/share/sshfling/templates/compose.client.yml
+644 usr/share/sshfling/templates/compose.server.yml
+755 usr/share/sshfling/templates/production/sshfling-session
+755 usr/share/sshfling/templates/scripts/create-network.sh
+755 usr/share/sshfling/templates/scripts/generate-ssh-key.sh
+755 usr/share/sshfling/templates/scripts/install-local.sh
+755 usr/share/sshfling/templates/scripts/uninstall-local.sh
+644 usr/share/sshfling/templates/secrets/.gitkeep
+644 usr/share/sshfling/templates/ssh-client/Dockerfile
+755 usr/share/sshfling/templates/ssh-client/entrypoint.sh
+644 usr/share/sshfling/templates/ssh-server/Dockerfile
+755 usr/share/sshfling/templates/ssh-server/entrypoint.sh
+755 usr/share/sshfling/templates/ssh-server/limited-session.sh
+644 usr/share/sshfling/templates/ssh-server/sshd_config
+644 usr/share/sshfling/templates/systemd/sshflingd.env.example
+644 usr/share/sshfling/templates/systemd/sshflingd.service
+ASSETS
+  sort -k2,2 "$expected" -o "$expected"
+  if ! diff -u "$expected" "$actual" >&2; then
+    echo "sshfling: DEB payload asset list changed unexpectedly" >&2
+    rm -f "$actual" "$expected"
+    exit 1
+  fi
+  rm -f "$actual" "$expected"
+}
+
 rm -rf "$stage"
 install -d "$stage/DEBIAN" "$stage/usr/bin" "$stage/usr/share/sshfling/templates" "$stage/usr/share/doc/sshfling" "$stage/lib/systemd/system"
 install -d -m 0750 "$stage/etc/sshfling"
@@ -24,6 +91,8 @@ install -m 0644 "$repo_root/README.md" "$stage/usr/share/doc/sshfling/README.md"
 install -m 0644 "$repo_root/LICENSE" "$stage/usr/share/doc/sshfling/LICENSE"
 install -m 0644 "$repo_root/systemd/sshflingd.env.example" "$stage/usr/share/doc/sshfling/sshflingd.env.example"
 install -m 0644 "$repo_root/systemd/sshflingd.service" "$stage/lib/systemd/system/sshflingd.service"
+
+assert_deb_payload_assets
 
 cat >"$stage/DEBIAN/control" <<CONTROL
 Package: sshfling
@@ -70,11 +139,25 @@ user_exists() {
   fi
 }
 
-record_install_state() {
-  if [ -f "$state_file" ]; then
-    return 0
-  fi
+ensure_package_dir() {
+  dir_path=$1
+  dir_mode=$2
+  dir_owner=$3
+  dir_group=$4
 
+  if [ -L "$dir_path" ] || { [ -e "$dir_path" ] && [ ! -d "$dir_path" ]; }; then
+    echo "sshfling: refusing to manage unsafe package directory $dir_path" >&2
+    exit 1
+  fi
+  install -d -m "$dir_mode" -o "$dir_owner" -g "$dir_group" "$dir_path"
+}
+
+ensure_package_state_dir() {
+  ensure_package_dir "$state_root" 0750 root root
+  ensure_package_dir "$state_dir" 0700 root root
+}
+
+record_install_state() {
   group_preexisting=no
   user_preexisting=no
   var_dir_preexisting=no
@@ -88,8 +171,15 @@ record_install_state() {
     var_dir_preexisting=yes
   fi
 
-  install -d -m 0750 -o root -g root "$state_root"
-  install -d -m 0700 -o root -g root "$state_dir"
+  ensure_package_state_dir
+  if [ -e "$state_file" ] || [ -L "$state_file" ]; then
+    if [ -f "$state_file" ] && [ ! -L "$state_file" ]; then
+      return 0
+    fi
+    echo "sshfling: refusing to use unsafe install state $state_file" >&2
+    exit 1
+  fi
+
   {
     echo "group_preexisting=$group_preexisting"
     echo "user_preexisting=$user_preexisting"
@@ -138,8 +228,8 @@ case "$1" in
   configure)
     record_install_state
     ensure_account
-    install -d -m 0750 -o root -g sshflingd /etc/sshfling
-    install -d -m 0750 -o sshflingd -g sshflingd /var/lib/sshflingd
+    ensure_package_dir /etc/sshfling 0750 root sshflingd
+    ensure_package_dir /var/lib/sshflingd 0750 sshflingd sshflingd
     if [ -f /etc/sshfling/policy.json ] && [ ! -L /etc/sshfling/policy.json ]; then
       chown root:root /etc/sshfling/policy.json
       chmod 0644 /etc/sshfling/policy.json
@@ -210,6 +300,11 @@ var_lib_is_empty() {
 }
 
 read_install_state() {
+  if [ -L "$state_root" ] || [ -L "$state_dir" ]; then
+    echo "sshfling: ignoring symlinked package state directory" >&2
+    return 0
+  fi
+
   if [ ! -f "$state_file" ] || [ -L "$state_file" ]; then
     return 0
   fi
@@ -242,7 +337,15 @@ read_install_state() {
 }
 
 remove_package_state() {
-  rm -rf "$state_dir"
+  if [ -L "$state_root" ]; then
+    echo "sshfling: not removing symlinked package state root $state_root" >&2
+    return 0
+  fi
+  if [ -L "$state_dir" ]; then
+    rm -f "$state_dir"
+  else
+    rm -rf "$state_dir"
+  fi
   rmdir "$state_root" 2>/dev/null || true
 }
 
@@ -299,6 +402,8 @@ exit 0
 POSTRM
 
 chmod 0755 "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm" "$stage/DEBIAN/postrm"
+
+normalize_tree_timestamps "$stage"
 
 install -d "$dist_dir"
 dpkg-deb --build --root-owner-group "$stage" "$dist_dir/sshfling_${version}_all.deb"

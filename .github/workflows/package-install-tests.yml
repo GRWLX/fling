@@ -403,6 +403,25 @@ jobs:
             throw "Installed sshfling.cmd was not found"
           }
           tests\cross-os\validate-cli.ps1 -CommandPath $cmd -Version $version
+          Start-Process msiexec.exe -Wait -ArgumentList "/x", $msi, "/qn", "/norestart"
+          $remainingCommands = $candidates | Where-Object { Test-Path $_ }
+          if ($remainingCommands) {
+            throw "MSI uninstall left installed command(s): $($remainingCommands -join ', ')"
+          }
+          $remainingDirs = @(
+            (Join-Path $env:ProgramFiles "SSHFling"),
+            (Join-Path ${env:ProgramFiles(x86)} "SSHFling")
+          ) | Where-Object { Test-Path $_ }
+          if ($remainingDirs) {
+            throw "MSI uninstall left install directory/directories: $($remainingDirs -join ', ')"
+          }
+          $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+          foreach ($candidate in $candidates) {
+            $dir = Split-Path -Parent $candidate
+            if (($machinePath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $dir.TrimEnd('\') }).Count -gt 0) {
+              throw "MSI uninstall left install directory in machine PATH: $dir"
+            }
+          }
 
   windows-zip:
     name: Windows zip run

@@ -36,6 +36,34 @@ function Test-PathUnderRoot([string]$Path, [string]$Root) {
   return $fullPath.StartsWith($fullRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-SameFilesystemPath([string]$Left, [string]$Right) {
+  if (-not $Left -or -not $Right) {
+    return $false
+  }
+  try {
+    $separators = [char[]]@("\", "/")
+    $fullLeft = [System.IO.Path]::GetFullPath($Left).TrimEnd($separators)
+    $fullRight = [System.IO.Path]::GetFullPath($Right).TrimEnd($separators)
+  }
+  catch {
+    return $false
+  }
+  return $fullLeft.Equals($fullRight, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-PathListContainsPath([string]$PathList, [string]$ExpectedPath) {
+  if (-not $PathList -or -not $ExpectedPath) {
+    return $false
+  }
+  foreach ($entry in ($PathList -split ";")) {
+    $candidate = $entry.Trim().Trim([char]'"')
+    if ($candidate -and (Test-SameFilesystemPath $candidate $ExpectedPath)) {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Test-CommandFromProgramFiles([string]$Path) {
   $programRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
   foreach ($root in $programRoots) {
@@ -88,6 +116,18 @@ function Assert-WindowsMsiMetadata([string]$Path, [string]$ExpectedVersion) {
   }
   if (-not ([string]$packageMetadata.DependencyScope).Contains("does not bundle or remove Python")) {
     Fail "Windows MSI package registry metadata did not record dependency scope"
+  }
+  $installDir = [string]$packageMetadata.InstallDir
+  if (-not $installDir -or -not (Test-PathUnderRoot $Path $installDir)) {
+    Fail "Windows MSI package registry metadata did not match installed command path: $installDir"
+  }
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  if (-not (Test-PathListContainsPath $machinePath $installDir)) {
+    Fail "Windows MSI did not add install directory to the machine PATH: $installDir"
+  }
+  $windowsStateScope = [string]$packageMetadata.WindowsStateScope
+  if ($windowsStateScope -and -not $windowsStateScope.Contains("does not create Windows services")) {
+    Fail "Windows MSI package registry metadata did not record Windows service/task scope"
   }
 }
 

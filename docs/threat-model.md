@@ -3,16 +3,17 @@
 ## Executive summary
 
 SSHFling's highest enterprise risks cluster around privileged temporary SSH
-access, package and repository publishing, CA and repository signing key
-custody, incomplete expired-access cleanup automation, desktop signing gaps,
-unsupported platform claims, and audit breadcrumbs for AI-assisted work. The
-repo has meaningful controls: short-lived grants, hard lifetime/session caps,
-explicit certificate mode, issuer bearer-token validation, loopback defaults,
-systemd hardening, signed APT/RPM repository support for the public package
-site, release evidence generation, and best-effort `logger` audit events.
-Residual risk remains where host accounts are privileged, process containment
-depends on child-tree cleanup instead of a cgroup boundary, release protections
-live in GitHub settings rather than source, desktop signing/notarization is
+access, package and repository publishing, GHCR container image publishing, CA
+and repository signing key custody, incomplete expired-access cleanup
+automation, desktop signing gaps, unsupported platform claims, and audit
+breadcrumbs for AI-assisted work. The repo has meaningful controls: short-lived
+grants, hard lifetime/session caps, explicit certificate mode, issuer
+bearer-token validation, loopback defaults, systemd hardening, signed APT/RPM
+repository support for the public package site, release evidence generation,
+and best-effort `logger` audit events. Residual risk remains where host
+accounts are privileged, process containment depends on child-tree cleanup
+instead of a cgroup boundary, release protections live in GitHub settings rather
+than source, desktop signing/notarization and container signing/provenance are
 external, security scans are not required CI gates, and breadcrumb retention
 depends on operator workflow.
 
@@ -23,7 +24,7 @@ In scope:
 - Runtime access broker and CLI: `bin/sshfling`, `production/sshfling-session`, `systemd/sshflingd.service`, `systemd/sshflingd.env.example`.
 - SSH host configuration paths: password grants, certificate host install/uninstall, password prune, OpenSSH wrapper behavior.
 - Agentic workflow documentation: `docs/ai-temporary-access.md`, `docs/codex-enterprise-workflow.md`.
-- Package publishing and validation: `.github/workflows/release-packages.yml`, `.github/workflows/public-package-web.yml`, `packaging/build-public-web.sh`, `packaging/verify-public-web.sh`, `packaging/version.sh`, `docs/release-checklist.md`, `docs/release-evidence.md`, `docs/repos.md`.
+- Package and container publishing validation: `.github/workflows/release-packages.yml`, `.github/workflows/public-package-web.yml`, `.github/workflows/github-packages.yml`, `packaging/build-public-web.sh`, `packaging/verify-public-web.sh`, `packaging/version.sh`, `docs/release-checklist.md`, `docs/release-evidence.md`, `docs/repos.md`.
 - Docker harness defaults only as a development/test boundary, not as the production host model.
 
 Out of scope:
@@ -42,6 +43,7 @@ Assumptions:
 Open questions that would change risk:
 
 - Are release tags, the `github-pages` environment, and repository signing secrets protected by mandatory review in GitHub settings?
+- Are GHCR package publish permissions, image tags, and container consumers protected by signature, digest pinning, and mandatory release review?
 - Are CA private keys and repository signing keys stored in GitHub secrets only, or in a managed KMS/HSM/signing service?
 - Do production hosts install a timer/cron job to run `sshfling password prune` and alert on expired grant metadata?
 - Are AI/tool accounts denied `sudo`, scheduler access, service-unit writes, and other persistence paths by host policy?
@@ -56,7 +58,7 @@ Open questions that would change risk:
 - Issuer service (`bin/sshfling::cmd_serve`, `IssuerHandler`): local HTTP API for certificate issuance using a bearer token, allowed principals, request body caps, and per-IP rate limiting.
 - Web console (`bin/sshfling::cmd_web`, `WebHandler`): localhost-by-default admin UI for policy updates and session kills, protected by password/session/CSRF controls.
 - Policy and state: `/etc/sshfling/policy.json`, `/var/lib/sshfling/password-grants`, per-user detached metadata under `~/.sshfling/detached`.
-- Package publishing: GitHub Actions workflows build packages, generate checksums/evidence, optionally sign APT/RPM metadata, attest provenance, and deploy a verified Pages artifact.
+- Package publishing: GitHub Actions workflows build packages, generate checksums/evidence, optionally sign APT/RPM metadata, attest provenance, deploy a verified Pages artifact, and publish client/server container images to GHCR.
 - Agentic workflow breadcrumbs: named grants, detached job names, PIDs, stdout/stderr logs, worker-owned path prompts, release tickets, and workflow links.
 
 ### Data flows and trust boundaries
@@ -68,6 +70,7 @@ Open questions that would change risk:
 - Issuer service -> CA private key: data includes public key, serial, principal, lifetime, and certificate critical options; channel is local filesystem plus `ssh-keygen`; security guarantees are file permissions, systemd read-only `/etc/sshfling`, and service group read access; validation includes policy caps and allowed principal checks.
 - CLI/web -> policy and grant state: data includes JSON policy, grant metadata, managed sshd snippets, and detached job metadata; channel is local filesystem; controls include root requirements for sensitive commands, atomic JSON writes, file mode setting, marker checks before removal, and policy max caps.
 - Release workflow -> GitHub Releases/Pages -> fleet package managers: data includes source archives, packages, metadata, checksums, signing keys, provenance attestations, and install scripts; channel is GitHub Actions artifact flow and HTTPS package downloads; controls include version validation, exact artifact set checks, SHA-256 generation, APT/RPM signing support for the package-site path, verifier rejection of weak trust flags, tag-only package-site publish gate, a named Pages environment, and release evidence packets. Required reviewer settings, protected tags, and live approvals are external GitHub controls.
+- GitHub Packages workflow -> GHCR -> container consumers: data includes Docker build contexts, OCI image layers, mutable branch/latest tags, version tags, SHA tags, labels, and registry package metadata; channel is GitHub Actions to GHCR and container pulls; controls include version/tag consistency checks and limited workflow permissions, but image signing, attestation, SBOM, vulnerability gating, protected environment review, and digest pinning are not enforced by source.
 - AI worker -> repository/task artifacts: data includes prompts, owned paths, detached logs, PIDs, and workflow validation links; channel is SSH shell, local filesystem, GitHub tickets/actions; controls are documentation and conventions rather than hard runtime enforcement.
 
 #### Diagram
@@ -85,6 +88,7 @@ flowchart LR
   P["Policy and state"]
   R["Release workflows"]
   G["GitHub Releases Pages"]
+  K["GHCR images"]
   F["Fleet hosts"]
   L["System logs"]
   O -->|sudo local| C
@@ -97,7 +101,9 @@ flowchart LR
   I -->|sign cert| CA
   I -->|read policy| P
   R -->|artifacts| G
+  R -->|images| K
   G -->|packages| F
+  K -->|containers| F
 ```
 
 ## Assets and security objectives
@@ -109,6 +115,7 @@ flowchart LR
 | SSHFling user CA private key | Can mint trusted SSH certificates if stolen or misused. | C/I |
 | Repository signing private key and fingerprint | Establishes APT/RPM package trust for fleets. | C/I |
 | GitHub release workflows, tags, Pages deployment, and package artifacts | Compromise can distribute root/admin code to customers. | I/A |
+| GHCR container images, tags, and digests | Compromise can distribute altered client/server runtime images to container users. | I/A |
 | Platform coverage records and support claims | Unsupported OS, runtime, CPU architecture, hardware, ARM/IoT, or FPGA/SoC claims can push customers into unvalidated deployments. | I/A |
 | `/etc/sshfling/policy.json` | Controls lifetime and concurrency caps. | I/A |
 | Password grant metadata and managed sshd snippets | Determines whether expired password grants are blocked, locked, or deleted. | I/A |
@@ -124,6 +131,7 @@ flowchart LR
 - Remote network attacker can attempt SSH authentication against exposed hosts and issuer/web endpoints if operators expose them.
 - Token holder can call the issuer API if they obtain the bearer token and network path.
 - Malicious or compromised package publisher can attempt to modify artifacts, metadata, install scripts, or signing keys.
+- Malicious or compromised package publisher can attempt to publish mutable GHCR image tags or altered OCI layers.
 - Temporary SSH user or AI tool can run commands with the granted Unix account's privileges during the grant window.
 - Insider or compromised maintainer account can attempt to alter release workflows, policy files, tags, or release evidence.
 
@@ -140,7 +148,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | Password grant setup | `sudo sshfling`, `sudo sshfling -t ...` | Operator/admin -> root local host | Creates Unix user/password, managed `Match User`, metadata, wrapper. | `bin/sshfling::cmd_setup_password`, `password_grant_config` |
 | Password SSH login | `sshfling user@host` or `ssh user@host` | Workstation/AI -> OpenSSH | Password auth enabled only for managed user; forwarding disabled; forced wrapper applies. | `bin/sshfling::password_grant_config`, `production/sshfling-session` |
-| Certificate issue CLI | `sudo sshfling --certificate`, `sshfling cert issue` | Operator/admin -> CA key | Signs public keys with force-command critical option and policy cap. | `bin/sshfling::cmd_setup_certificate`, `sign_user_certificate` |
+| Certificate issue CLI | `sudo sshfling --certificate`, `sshfling cert issue --certificate` | Operator/admin -> CA key | Signs public keys with force-command critical option and policy cap. | `bin/sshfling::cmd_setup_certificate`, `sign_user_certificate` |
 | Certificate host install/uninstall | `sshfling host install/uninstall` | Root local host -> OpenSSH config | Installs trusted CA, principals, wrapper, and managed sshd config; uninstall removes managed files by marker/content. | `bin/sshfling::cmd_host_install`, `cmd_host_uninstall` |
 | Issuer API | `POST /v1/certificates` | Issuer client -> local HTTP service | Bearer token, body cap, rate limit, allowed principals, loopback default. | `bin/sshfling::IssuerHandler`, `cmd_serve`, `systemd/sshflingd.env.example` |
 | Web console | `sshfling web` | Browser/admin -> local HTTP service | Password auth, CSRF token, session cookie, policy updates, session kills. | `bin/sshfling::WebHandler`, `cmd_web` |
@@ -149,19 +157,21 @@ flowchart LR
 | Detached jobs | `sshfling detached start/list/kill` | Operator/session -> local process manager | Metadata/logs in user-owned dir; max 10 jobs; forced-session starts denied unless explicitly allowed. | `bin/sshfling::cmd_detached_start`, `cmd_detached_supervisor` |
 | Package release | Tag push or workflow dispatch | Maintainer/GitHub -> artifacts/releases | Builds packages, verifies versions/artifact set, checksums, evidence, attestations. | `.github/workflows/release-packages.yml`, `packaging/version.sh` |
 | Public package site | Tag publish to Pages | GitHub Actions -> package managers | Generates APT/RPM/Homebrew/macOS/Windows/community outputs, signing metadata, verifier gates. | `.github/workflows/public-package-web.yml`, `packaging/build-public-web.sh`, `packaging/verify-public-web.sh` |
+| GHCR container images | Push to `main`, tag push, or workflow dispatch | GitHub Actions -> container registry/users | Builds and pushes client/server images with `latest`, version, ref, and SHA tags; no source-defined image signing, SBOM, vulnerability gate, or protected environment. | `.github/workflows/github-packages.yml`, `ssh-client/Dockerfile`, `ssh-server/Dockerfile` |
 | Agentic workflow breadcrumbs | AI-assisted SSH or detached work | Operator/AI -> repo, logs, tickets | Named grants/jobs, PIDs, logs, workflow links, worker-owned paths are documented but mostly procedural. | `docs/ai-temporary-access.md`, `docs/codex-enterprise-workflow.md`, `.codex/config.toml` |
 
 ## Top abuse paths
 
 1. Package supply-chain compromise -> attacker alters package metadata or install script -> fleet installs attacker-controlled `sshfling` as root/admin -> attacker steals CA keys, policy, or host credentials.
 2. Repository signing key theft -> attacker publishes signed malicious APT/RPM metadata -> package manager accepts update -> enterprise hosts run malicious package code.
-3. Issuer token theft plus remote exposure -> attacker calls `/v1/certificates` for an allowed principal -> receives a trusted user certificate -> SSHs into target until certificate/wrapper expiry.
-4. CA private key theft -> attacker signs certificates outside SSHFling -> omits force-command or extends validity -> host accepts access if the trusted CA remains installed.
-5. Temporary grant to privileged account -> AI tool or attacker runs commands as `root`/deploy -> modifies services, credentials, scheduled jobs, or data within the grant window -> temporary identity gives attribution but not isolation.
-6. Process escape from timeout wrapper -> temporary user starts re-parented or scheduler-managed process -> wrapper kills known child tree but not all host persistence paths -> work continues after access expiry.
-7. Expired password grant is not pruned -> managed sshd snippet and account remain until manual cleanup -> wrapper rejects expired logins, but stale state increases operational confusion and account-management risk.
-8. Breadcrumb gap in parallel AI work -> agent grants/jobs are unnamed or logs are lost -> reviewers cannot tie changes to tickets, PIDs, workflow runs, or owners -> malicious or mistaken changes are harder to audit and roll back.
-9. Unsupported platform claim -> customer deploys to an unvalidated OS, CPU architecture, edge appliance, or FPGA/SoC control plane -> required Python/OpenSSH/account tooling differs from assumptions -> temporary access, cleanup, logging, or package trust behavior fails in production.
+3. GHCR container supply-chain compromise -> attacker pushes a malicious `latest`, branch, or version tag -> a user pulls the altered image without digest or signature verification -> attacker controls the SSHFling client/server runtime container.
+4. Issuer token theft plus remote exposure -> attacker calls `/v1/certificates` for an allowed principal -> receives a trusted user certificate -> SSHs into target until certificate/wrapper expiry.
+5. CA private key theft -> attacker signs certificates outside SSHFling -> omits force-command or extends validity -> host accepts access if the trusted CA remains installed.
+6. Temporary grant to privileged account -> AI tool or attacker runs commands as `root`/deploy -> modifies services, credentials, scheduled jobs, or data within the grant window -> temporary identity gives attribution but not isolation.
+7. Process escape from timeout wrapper -> temporary user starts re-parented or scheduler-managed process -> wrapper kills known child tree but not all host persistence paths -> work continues after access expiry.
+8. Expired password grant is not pruned -> managed sshd snippet and account remain until manual cleanup -> wrapper rejects expired logins, but stale state increases operational confusion and account-management risk.
+9. Breadcrumb gap in parallel AI work -> agent grants/jobs are unnamed or logs are lost -> reviewers cannot tie changes to tickets, PIDs, workflow runs, or owners -> malicious or mistaken changes are harder to audit and roll back.
+10. Unsupported platform claim -> customer deploys to an unvalidated OS, CPU architecture, edge appliance, or FPGA/SoC control plane -> required Python/OpenSSH/account tooling differs from assumptions -> temporary access, cleanup, logging, or package trust behavior fails in production.
 
 ## Threat model table
 
@@ -176,6 +186,7 @@ flowchart LR
 | TM-007 | Malicious or mistaken AI agent | Concurrent agent work lacks stable identifiers, owned paths, or retained logs. | Change files without clear task owner; erase detached logs with `--replace`; omit release/workflow links. | Weakened auditability and harder rollback or incident reconstruction. | Prompts, detached metadata/logs, release tickets, audit logs. | Named grants/jobs in docs; detached metadata/log paths in `cmd_detached_start`; `.codex/config.toml` sets `max_depth=1`; `docs/codex-enterprise-workflow.md` requires disjoint write sets and workflow links. | Ticket IDs are not enforced by CLI; `logger` is best effort; detached logs are user-local and can be deleted on replace; central retention is external. | Require ticket-formatted grant/job names; ship a `--reason` or structured audit field; centralize syslog/journald and detached logs; prohibit `--replace` without ticket reference; attach workflow links to release/change records. | Alert on unnamed grants, detached jobs without ticket pattern, missing logs, concurrent writes to same path, and workflow validation absent from release ticket. | Medium | Medium | medium |
 | TM-008 | Web console attacker or weak admin password | Web console exposed remotely or password/session secret mishandled. | Log in, change policy caps, or kill sessions. | Reduced access controls, denial of service against active work, audit noise. | Policy file, active sessions, web session cookie. | `cmd_web` requires root, loopback default, remote bind refusal without `--allow-remote`, PBKDF2 password hash support, CSRF token, `SameSite=Strict`, rate-limited login. | TLS, external auth, password rotation, and central logging are operator-managed; session secret is process-local unless env configured. | Keep web loopback behind SSO/mTLS if exposed; require hashed passwords; set stable high-entropy session secret; alert on remote mode. | Alert on `web_service_started allow_remote=true`, login failures, policy updates, and session kills. | Low | Medium | medium |
 | TM-009 | Sales, release, or deployment process overclaims coverage | Platform claim is copied from artifact generation or workflow names without host evidence. | Deploy SSHFling to unvalidated OS/hardware or embedded/FPGA control-plane environments. | Temporary access, package install, cleanup, logging, or dependency behavior may fail where enterprise policy assumed support. | Platform coverage records, release evidence, customer hosts, audit records. | Cross-OS and package-install workflows cover several Linux, BSD, macOS, and Windows paths; build target docs require a platform coverage declaration. | Generated artifact matrices do not prove hardware coverage; ARM/IoT/FPGA fabric behavior is not tested; customer-managed OS hardening and OpenSSH/Python/account-tool versions need separate evidence. | Require release-specific platform coverage declarations with host facts, exact OS/runtime/CPU data, package hashes, workflow URLs, customer evidence, and unsupported/deferred target exceptions. | Alert during release review when claims mention an OS, architecture, hardware class, ARM/IoT target, or FPGA/SoC platform without evidence link. | Medium | Medium | medium |
+| TM-010 | Compromised maintainer, workflow token, or GHCR publisher | Ability to trigger or alter `.github/workflows/github-packages.yml`, push to `main`, create a tag, or publish to the package namespace. | Publish malicious client/server container images under mutable or version-like tags. | Container users may run attacker-controlled images, exposing SSH keys, commands, network access, or test infrastructure. | GHCR images, container tags/digests, Dockerfiles, package namespace. | Workflow validates tag/version consistency and uses `contents: read` plus `packages: write`; Dockerfile hygiene is covered by the release security scan tooling. | No protected environment, image signing, image attestations, SBOM/provenance, vulnerability gate, or source-defined digest-pinning requirement; `latest` and branch tags are mutable. | Restrict production image publication to protected tags/environments, sign images with a managed keyless or key-backed signing flow, publish SBOM/provenance, vulnerability-scan images before publish, and require consumers to pin digests or verify signatures. | Alert on GHCR package publish/delete events, unexpected workflow actors, new `latest` digests, unsigned images, vulnerability scan failures, and deployment pulls by mutable tag. | Medium | High | high |
 
 ## Evidence gaps
 
@@ -184,6 +195,7 @@ flowchart LR
 - The repo provides release evidence templates and workflow artifacts, but completed release packets, external audit logs, and approvals must be attached per release.
 - CA and repository signing keys can be represented as GitHub secrets or files; the repo does not prove HSM/KMS custody, rotation, dual control, or secret access review.
 - Current macOS and Windows build scripts produce `.pkg`, `.msi`, and `.zip` artifacts but do not perform Apple Developer ID signing, notarization, stapling, or Windows Authenticode signing.
+- GitHub Packages container images are published by `.github/workflows/github-packages.yml`, but source does not require image signing, image attestations, SBOM/provenance, vulnerability scanning, protected environment approval, or consumer digest pinning.
 - `make release-security-scan` exists, but the reviewed workflows do not run it as a required publishing gate and optional scanner findings are not source-defined as blocking.
 - The code supports `password prune`, but no packaged systemd timer or cron job proves expired-access deletion will happen on production hosts.
 - Session timeout is implemented by wrapper and process-tree cleanup, not by an unavoidable kernel or service-manager boundary.
@@ -192,8 +204,8 @@ flowchart LR
 
 ## Criticality calibration
 
-- Critical: compromise lets an attacker publish trusted packages to customers, sign trusted repository metadata, mint certificates without policy controls, or gain pre-auth remote code execution on the issuer/web service.
-- High: compromise grants unauthorized SSH access to privileged accounts, steals CA/signing keys, bypasses issuer policy, or persists beyond an access window on production hosts.
+- Critical: compromise lets an attacker publish trusted packages or container images to customers, sign trusted repository metadata, mint certificates without policy controls, or gain pre-auth remote code execution on the issuer/web service.
+- High: compromise grants unauthorized SSH access to privileged accounts, steals CA/signing keys, bypasses issuer policy, publishes unsigned or unreviewed production images, or persists beyond an access window on production hosts.
 - Medium: compromise causes stale account/config state, incomplete audit trail, denial of service to active SSHFling sessions, or package verification gaps that require additional operator mistakes.
 - Low: issues require local admin control, affect only test harness defaults, or expose low-sensitivity metadata without changing access or package trust decisions.
 
@@ -210,6 +222,9 @@ flowchart LR
 | `packaging/version.sh` | Prevents unsafe or mismatched version strings from driving package generation. | TM-001 |
 | `.github/workflows/release-packages.yml` | Builds release artifacts, validates artifact set, emits checksums/evidence, attests provenance, publishes release. | TM-001, TM-002 |
 | `.github/workflows/public-package-web.yml` | Controls package-site publish mode, signing requirements, evidence generation, attestation, and Pages deployment. | TM-001, TM-002 |
+| `.github/workflows/github-packages.yml` | Publishes client/server container images to GHCR and controls mutable image tags. | TM-010 |
+| `ssh-client/Dockerfile` | Defines the client runtime image published to GHCR. | TM-010 |
+| `ssh-server/Dockerfile` | Defines the server runtime image published to GHCR. | TM-010 |
 | `docs/release-evidence.md` | Captures approvals, signing/key management, validation, rollback, and audit evidence required outside code. | TM-001, TM-002 |
 | `docs/build-targets.md` | Defines package targets and platform-coverage evidence expectations; artifact generation is not itself support proof. | TM-009 |
 | `docs/ai-temporary-access.md` | User-facing guidance for AI-assisted access and its temporary-access limits. | TM-004, TM-005, TM-006, TM-007 |
@@ -219,8 +234,8 @@ flowchart LR
 ## Quality check
 
 - Covered discovered runtime entry points: password setup/login, certificate setup/issuer/host install, web console, list/kill, prune, detached jobs.
-- Covered build and release entry points: release package workflow, public package web workflow, signing metadata generation, verifier, release evidence.
+- Covered build and release entry points: release package workflow, public package web workflow, GitHub Packages container workflow, signing metadata generation, verifier, release evidence.
 - Covered desktop authenticity and platform-coverage gaps: macOS notarization, Windows Authenticode, OS/runtime/CPU/hardware declarations, ARM/IoT, and FPGA/SoC control-plane scope.
-- Covered each modeled trust boundary in at least one threat: operator local host, SSH client to OpenSSH, OpenSSH to wrapper, issuer to CA, local state, release to fleet, and AI workflow breadcrumbs.
+- Covered each modeled trust boundary in at least one threat: operator local host, SSH client to OpenSSH, OpenSSH to wrapper, issuer to CA, local state, release to fleet, GHCR to container consumers, and AI workflow breadcrumbs.
 - Separated production/runtime behavior from Docker test harness and CI/build tooling.
 - Marked assumptions and evidence gaps explicitly where controls depend on GitHub settings, host policy, external signing systems, or operator runbooks.

@@ -120,7 +120,7 @@ OpenSSH user certificates are available explicitly:
 - `sshfling ca init` creates an SSH user CA keypair.
 - `sshfling host install` configures a target host to trust the CA for one Unix user.
 - `sudo sshfling --certificate` creates a temporary certificate grant.
-- `sshfling cert issue` signs a user's public key for a short lifetime.
+- `sshfling cert issue --certificate` signs a user's public key for a short lifetime.
 - `sshfling serve` runs a small authenticated certificate issuer service.
 
 The issued certificate includes an OpenSSH `force-command` option that runs `sshfling-session` on the target host. That wrapper enforces the session wall-clock limit, so an already-connected SSH session is killed when its allowed time is reached.
@@ -195,6 +195,25 @@ Install per-user policy limits:
 sudo sshfling policy install --user deploy --max-time 30m --max-connections 3
 ```
 
+Policy also records an access-level classification for least-privilege review:
+
+```bash
+sudo sshfling policy install --user deploy --access-level sudo-limited --max-time 30m --max-connections 1
+sudo sshfling --certificate --username ticket-1234 --login-user deploy --access-level sudo-limited -t 10m
+```
+
+Access levels are policy metadata and audit evidence; they do not add the
+account to sudoers, local administrators, groups, roles, or IAM bindings. The
+supported levels are `standard`, `operator`, `sudo-limited`, and
+`admin/root-equivalent`. `standard` is the default for temporary users,
+`operator` is for approved operational accounts without broad sudo,
+`sudo-limited` is for reviewed constrained elevation, and `admin` is for
+root-equivalent or break-glass access. Grant requests can pass `--access-level`
+or `--role`; SSHFling rejects a requested level above the effective policy
+level and treats `root` or `Administrator` logins as admin-class access. Host
+controls such as Unix groups, sudoers, PAM, AD, MDM, and service-manager policy
+remain the enforcement layer for actual privileges.
+
 Run the local web console:
 
 ```bash
@@ -235,7 +254,7 @@ sudo sshfling host uninstall --username temp-remote --reload
 Issue a temporary certificate for a client public key:
 
 ```bash
-sudo sshfling cert issue \
+sudo sshfling cert issue --certificate \
   --ca-key /etc/sshfling/ca_user_ed25519 \
   --public-key-file ~/.ssh/id_ed25519.pub \
   --username temp-remote \
@@ -458,22 +477,23 @@ GitHub Actions workflows are included for public distribution:
 - `Package install tests` installs from the published package site and verifies the requested `sshfling` version across Linux package repos and community package manifests.
 - `Cross OS validation` installs or builds those outputs across Linux, BSD, macOS, and Windows and checks the 24-hour policy default, copied service templates, active-session PID fields, and detached job PID lifecycle.
 
-### v0.1.12/vNext Release Readiness
+### v0.1.13 Release Readiness
 
-The latest tagged source release in this checkout is `v0.1.12` at commit
-`58b23b5fa9b90491c41b41fc206d8e907b00e8df`. The current working tree may contain
-vNext release-hardening changes that are not part of that tag until they are
-committed, validated, and tagged.
+`v0.1.13` is the follow-up hardened package publishing release candidate. The
+previous published release is `v0.1.12` at commit
+`58b23b5fa9b90491c41b41fc206d8e907b00e8df`.
 
 `v0.1.12` shipped enterprise package publishing preparation: package builders,
 public package-site verification, repository registration docs, community
 manifest generation, release checklist/evidence templates, cross-OS/package
 install validation, release matrix tooling, and enterprise operations docs.
 
-The vNext release candidate should be treated as blocked until release evidence
-is attached for the final commit: clean worktree, workflow run URLs, artifact
-checksums, repository signing fingerprint, Pages deployment ID, release approval,
-and macOS/Windows signing or notarization evidence where applicable.
+The `v0.1.13` release candidate should be treated as blocked until release
+evidence is attached for the final commit: clean worktree, workflow run URLs,
+artifact checksums, repository signing fingerprint, Pages deployment ID,
+release approval, runtime behavior evidence for password, certificate,
+access-level, prune, and uninstall behavior, and macOS/Windows signing or
+notarization evidence where applicable.
 
 Follow-up release checks from a clean final commit:
 
@@ -482,10 +502,10 @@ git status --short --branch
 make clean
 make test
 make test-containers
-make release-security-scan VERSION=0.1.12
+make release-security-scan VERSION=0.1.13
 make release-security-evidence-validate
-make package VERSION=0.1.12
-make release-assets-evidence VERSION=0.1.12
+make package VERSION=0.1.13
+make release-assets-evidence VERSION=0.1.13
 make release-matrix-validate \
   RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
   RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json

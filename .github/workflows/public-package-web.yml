@@ -99,6 +99,12 @@ jobs:
       - name: Build macOS package
         env:
           SSHFLING_VERSION: ${{ steps.version.outputs.version }}
+          SSHFLING_PKG_REQUIRE_SIGNING: ${{ vars.SSHFLING_PKG_REQUIRE_SIGNING }}
+          SSHFLING_PKG_SIGN_IDENTITY: ${{ secrets.SSHFLING_PKG_SIGN_IDENTITY }}
+          SSHFLING_PKG_SIGN_KEYCHAIN: ${{ secrets.SSHFLING_PKG_SIGN_KEYCHAIN }}
+          SSHFLING_PKG_SIGN_TIMESTAMP: ${{ vars.SSHFLING_PKG_SIGN_TIMESTAMP }}
+          SSHFLING_PKG_REQUIRE_NOTARIZATION: ${{ vars.SSHFLING_PKG_REQUIRE_NOTARIZATION }}
+          SSHFLING_PKG_NOTARY_PROFILE: ${{ secrets.SSHFLING_PKG_NOTARY_PROFILE }}
         run: ./packaging/build-pkg.sh
 
       - name: Upload macOS artifact

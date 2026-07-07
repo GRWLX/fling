@@ -13,7 +13,7 @@ SSHFling avoids that pattern. It lets an administrator issue access for a narrow
 ## Typical Flow
 
 1. An operator starts a temporary grant with `sudo sshfling -t 10m --username ticket-1234`.
-2. SSHFling creates or updates the temporary Unix user password, writes a tracked sshd `Match User` block, and prints `sshfling ticket-1234@host`.
+2. SSHFling creates a temporary Unix user and generated password, writes a tracked sshd `Match User` block, and prints `sshfling ticket-1234@host`.
 3. The AI tool or human operator uses standard SSH from the workstation or automation environment and enters the generated password when prompted.
 4. The server-side forced command enforces the wall-clock limit even if the connection is already open.
 5. The operator can list or kill active sessions with `sudo sshfling list`, `sudo sshfling -k ticket-1234`, or `sudo sshfling shutdown`.
@@ -26,7 +26,7 @@ For environments that require OpenSSH user certificates instead of generated loc
 sudo sshfling --certificate -t 10m --username ticket-1234
 ```
 
-Certificate mode can also be prepared once with `sshfling host install`, which configures OpenSSH to trust a local user certificate authority. It issues a short-lived certificate and prints a normal `ssh` command.
+Certificate mode can also be prepared once with `sshfling host install`, which configures OpenSSH to trust a local user certificate authority. An explicit `--certificate` grant then issues a short-lived certificate and prints a normal `ssh` command.
 
 ## Security Properties
 
@@ -66,6 +66,7 @@ The enterprise threat model for this workflow is in [SSHFling threat model](thre
 - The session wrapper enforces wall-clock expiry for the SSH session it launches, but hard containment of every descendant process depends on host controls such as systemd scopes, cgroups, and account policy.
 - Expired password grants should be pruned by an operator or fleet job. `sshfling password prune --all --delete-users` removes expired SSHFling-created users after managed sshd config removal is verified; existing break-glass users are locked/expired, not deleted.
 - Certificate mode depends on protecting the user CA private key and issuer token. Keep the issuer loopback-only unless it is behind approved TLS, mTLS, VPN, or equivalent access controls.
+- Password mode refuses to reset an existing Unix user by default; use `--allow-existing-user` only for a documented break-glass case.
 - Install SSHFling from signed package repositories for managed fleets, and record the package signing fingerprint, release workflow URL, and package-site evidence in the change ticket.
 
 ## Operational Guidance

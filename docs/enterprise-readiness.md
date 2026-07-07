@@ -1,8 +1,11 @@
 # Enterprise Readiness Assessment
 
-Assessment date: 2026-07-06
+Assessment date: 2026-07-07
 
-Scope: package publishing readiness for SSHFling, based on the current working tree review of `security_best_practices_report.md`, GitHub Actions workflows, packaging scripts, docs, and tests.
+Scope: package and container publishing readiness for SSHFling, plus
+enterprise vulnerability-intake readiness, based on the current working tree
+review of `security_best_practices_report.md`, GitHub Actions workflows,
+packaging scripts, docs, and tests.
 
 This document is operational compliance guidance for SOC 2, ISO 27001:2022, and
 NIST SP 800-53 Rev. 5-style audit readiness. It is not legal advice and does
@@ -23,8 +26,9 @@ repository signing for the public package site. The repo still cannot prove the
 controls enterprise assessors will care about most: required release approval,
 protected tag settings, protected environment reviewers, production
 signing-key custody, completed rollback evidence, macOS notarization, Windows
-Authenticode signing, security scans as blocking gates, and platform coverage
-for advertised OS, hardware, ARM, IoT, or FPGA/SoC targets.
+Authenticode signing, container image signing/provenance, security scans as
+blocking gates, a complete vulnerability disclosure policy, and platform
+coverage for advertised OS, hardware, ARM, IoT, or FPGA/SoC targets.
 
 Estimated time to audit-ready depends on external GitHub settings, signing
 certificate availability, secret-store controls, and release-operation evidence.
@@ -35,6 +39,7 @@ The repository alone is not enough to establish an audit-ready state.
 In scope:
 
 - Package build and publishing workflows.
+- GitHub Packages container image publishing workflow and container release evidence.
 - Public package web generation and verification.
 - Release artifacts, checksums, signing material, and generated package manifests.
 - Release validation workflows and test evidence.
@@ -43,6 +48,7 @@ In scope:
   host control planes.
 - Operational evidence expected by enterprise customers and SOC 2, ISO 27001,
   NIST-aligned, and CIS-style hardening reviews.
+- Vulnerability disclosure and supported-version policy readiness.
 
 Out of scope for this document:
 
@@ -60,11 +66,13 @@ readiness summary only.
 | --- | --- | --- | --- | --- | --- |
 | Release authorization | CC8.1 | A.8.32 | CM-3, CM-5 | CIS Controls 4, 16 | Prove package releases are reviewed, approved, tested, and traceable to a change record. |
 | Build and package integrity | CC8.1, CC7.1 | A.8.25, A.8.29 | SA-10, SI-2, SI-7, CM-6 | CIS Controls 2, 4, 16 | Prove artifacts come from the intended source revision and passed validation before publishing. |
+| Container image publication | CC8.1, CC7.1 | A.8.25, A.8.29 | SA-10, SI-2, SI-7, SR-11 | CIS Controls 2, 4, 16 | Prove GHCR images are approved, signed or attested, scanned, and traceable to immutable digests. |
 | Signing and key management | CC6.1, CC6.6 | A.8.24, A.8.5 | IA-5, SC-12 | CIS Controls 4, 6 | Prove signing keys are controlled, rotated, and not exposed to unauthorized users. |
 | Secrets handling | CC6.1, CC6.2 | A.5.15, A.5.18, A.8.2 | AC-6, IA-5, PM-12 | CIS Controls 5, 6 | Prove repository, workflow, and signing secrets are restricted and reviewed. |
 | Rollback and recovery | CC7.4, CC7.5 | A.5.30, A.8.13 | CP-10, IR-4 | CIS Controls 11, 17 | Prove a bad package can be withdrawn or reverted with accountable approval. |
 | Audit logging | CC7.2, CC7.3 | A.8.15, A.8.16 | AU-2, AU-6, AU-11, AU-12 | CIS Control 8 | Prove release actions, failures, approvals, and exceptions are retained. |
 | Platform coverage claims | CC2.1, CC3.2, CC8.1 | A.5.8, A.5.37, A.8.32 | CA-2, CA-7, CM-8, SA-10 | CIS Controls 2, 15, 16 | Prove advertised OS, runtime, architecture, hardware, ARM, IoT, and FPGA/SoC host claims are backed by release evidence or approved exceptions. |
+| Vulnerability disclosure and response | CC7.1, CC7.2 | A.5.24, A.8.8 | SI-2, IR-6, RA-5 | CIS Controls 7, 17 | Prove security reports have a real intake channel, supported-version policy, triage SLA, advisory process, and customer communication path. |
 | Enterprise acceptance | CC2.1, CC3.2 | A.5.8, A.5.37 | CA-2, CA-7, RA-3 | CIS Control 15 | Prove customers receive a clear control checklist and residual-risk statement. |
 
 ## Findings
@@ -334,6 +342,83 @@ release after validation jobs and customer evidence are available.
 Priority: Medium for product release; High when marketing, sales, or customer
 contracts name specific ARM, IoT, or embedded hardware targets.
 
+### ER-010: GHCR Container Image Publishing Is Not Enterprise-Gated
+
+Status: Gap
+
+Control reference: SOC 2 CC8.1, CC7.1; ISO 27001 A.8.25, A.8.29; NIST SP
+800-53 SA-10, SI-2, SI-7, SR-11
+
+Current state: `.github/workflows/github-packages.yml` publishes SSHFling
+client and server container images to GHCR on pushes to `main`, version tags,
+and manual workflow dispatch. The workflow uses `GITHUB_TOKEN` with
+`packages: write`, builds from `ssh-client/Dockerfile` and
+`ssh-server/Dockerfile`, and emits mutable `latest`, branch/ref, version, and
+SHA-style tags. It does not define a protected environment, image signing,
+image attestation, SBOM generation, vulnerability scanning, digest-pinning
+requirements, or a release evidence record for the pushed image digests. The
+separate container test workflow gives useful functional evidence, but it is not
+a source-defined publication gate for the GHCR publish job.
+
+Target state: Production container images are published only from approved
+protected releases, are traceable to source commit and workflow run, are signed
+or attested, have SBOM and vulnerability evidence, and are consumed by immutable
+digest or verified signature.
+
+Remediation:
+
+1. Restrict production GHCR tags such as `latest` and version tags to protected
+   release tags or a protected GitHub Actions environment with required
+   reviewers.
+2. Sign images with an approved keyless or key-backed signing flow and retain
+   signature verification output.
+3. Generate and retain image SBOMs, provenance/attestations, image digests, and
+   vulnerability scan results.
+4. Define critical/high vulnerability thresholds or approved exceptions before
+   publishing production image tags.
+5. Tell enterprise consumers to pin image digests or verify signatures instead
+   of deploying mutable branch or `latest` tags.
+
+Estimated effort: 2 to 5 days after the signing and scanning approach is
+selected.
+
+Priority: High if GHCR images are enterprise distribution artifacts; Medium if
+they remain test-harness convenience images only.
+
+### ER-011: Security Policy And Vulnerability Intake
+
+Status: Source policy added; operational evidence still required
+
+Control reference: SOC 2 CC7.1, CC7.2; ISO 27001 A.5.24, A.8.8; NIST SP
+800-53 SI-2, IR-6, RA-5
+
+Current state: `SECURITY.md` now defines SSHFling supported-version scope,
+private vulnerability reporting expectations, acknowledgement and triage
+targets, coordinated disclosure expectations, and security scope. Enterprise
+release evidence still needs proof that the private intake channel is monitored
+and that support-channel ownership matches the current customer agreement.
+
+Target state: Security reporters and enterprise customers can identify
+supported versions, report vulnerabilities through a monitored private channel,
+receive expected response timelines, and track fixes, advisories, CVEs or
+release notes, and workarounds without exposing sensitive report details.
+
+Remediation:
+
+1. Attach evidence that the private GitHub vulnerability reporting path or
+   enterprise support channel is monitored by the release owner.
+2. Record the supported release line and any enterprise support exceptions in
+   the release ticket.
+3. Document how advisories, CVEs if applicable, fixed versions, workarounds,
+   and customer notifications are handled for the release.
+4. Add a quarterly check that the reporting channel is monitored and the policy
+   still matches supported releases.
+
+Estimated effort: 1 day for policy content; ongoing operational review each
+release and quarter.
+
+Priority: High for enterprise/customer-facing releases.
+
 ## Enterprise Acceptance Checklist
 
 Use this checklist before calling a release enterprise-ready.
@@ -344,11 +429,13 @@ Use this checklist before calling a release enterprise-ready.
 | Release tag is protected and traceable | Tag name, commit SHA, creator, signature status if used | Required |
 | Build ran from intended source | Workflow run IDs and checkout SHA | Required |
 | Package artifacts generated | Artifact names, sizes, SHA-256 values | Required |
+| GHCR image publication controlled | Image names, immutable digests, signing/attestation proof, SBOM, vulnerability scan, protected publish approval | Required if container images are enterprise artifacts |
 | Platform coverage declared | Exact OS/runtime/CPU/hardware/ARM/IoT/FPGA scope, evidence links, and exceptions | Required before making broad support claims |
 | APT/RPM repository signing verified | GPG fingerprint, `InRelease`, `Release.gpg`, RPM signature, `repomd.xml.asc` | Required for fleet Linux repos |
 | macOS package signed and notarized | Developer ID certificate and notarization output | Required for enterprise macOS |
 | Windows MSI signed | Authenticode verification output | Required for enterprise Windows |
 | Runtime behavior docs verified | README, wiki, and release notes confirm password default, explicit `--certificate` mode, prune limits, and uninstall limits | Required |
+| Security policy published | Supported versions, private reporting channel, SLA, advisory process, and customer notification path | Required before enterprise release |
 | Package web verified before publish | `packaging/verify-public-web.sh` output and run ID | Required |
 | Install tests passed | `Package install tests` run ID | Required |
 | Cross-OS validation passed or exception approved | `Cross OS validation` run ID and exception record | Required |
@@ -365,6 +452,9 @@ Retain for each release:
 - Tag, commit SHA, and diff summary.
 - GitHub Actions run URLs and logs for release, package web, install tests, and cross-OS validation.
 - Generated artifact list with SHA-256 values.
+- GHCR image names, immutable digests, signing or attestation proof, SBOM,
+  vulnerability scan output, and publish approval when container images are in
+  enterprise scope.
 - Platform coverage declaration covering OS versions, Python/OpenSSH versions,
   CPU architecture, hardware class, ARM/IoT/FPGA scope, evidence links, and
   exceptions.
@@ -379,6 +469,7 @@ Retain for each quarter:
 - Maintainer and repository admin access review.
 - CI secret access review.
 - Signing-key inventory review.
+- Vulnerability reporting channel and security policy review.
 - Sample release evidence packet review.
 
 ## Blockers Outside This Documentation Scope
@@ -386,7 +477,9 @@ Retain for each quarter:
 - Repository settings must enforce protected tags, required reviews, and protected environments; these cannot be proven from docs alone.
 - Production signing secrets and key custody must be configured in GitHub or a managed secret store.
 - macOS notarization and Windows Authenticode signing require platform certificates and workflow changes.
+- GHCR container image signing, attestation, SBOM, vulnerability scanning, and protected publish approval require workflow and policy changes.
 - Security scanning gates require workflow changes and triage ownership.
+- Vulnerability-intake ownership and quarterly security-policy review need operational evidence in the release or compliance packet.
 - Broad OS, runtime, CPU architecture, hardware, ARM, IoT, or FPGA/SoC support
   claims require release-specific evidence; current artifact matrices and
   workflow names are not enough by themselves.

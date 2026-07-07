@@ -69,6 +69,10 @@ normalize_gpg_fingerprint() {
   printf '%s' "${1:-}" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
 }
 
+normalize_public_file_mtimes() {
+  find "$public_dir/apt" "$public_dir/rpm" "$public_dir/downloads" -type f -exec touch -d "@$build_epoch" {} +
+}
+
 setup_repo_signing() {
   local private_key="${SSHFLING_REPO_GPG_PRIVATE_KEY:-}"
   local requested_key="${SSHFLING_REPO_GPG_KEY_ID:-}"
@@ -290,6 +294,7 @@ cp "$package_dist"/*.msi "$public_dir/downloads/"
 if compgen -G "$package_dist/*.zip" >/dev/null; then
   cp "$package_dist"/*.zip "$public_dir/downloads/"
 fi
+normalize_public_file_mtimes
 
 setup_repo_signing
 
@@ -311,6 +316,8 @@ fi
 createrepo_c \
   --revision "$build_epoch" \
   --set-timestamp-to-revision \
+  --simple-md-filenames \
+  --no-database \
   --workers 1 \
   "$public_dir/rpm"
 (

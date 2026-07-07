@@ -193,7 +193,7 @@ KEY_CUSTODY_EXPECTATIONS = [
         "name": "Debian package preserves root custody for issuer config",
         "path": "packaging/build-deb.sh",
         "markers": [
-            "install -d -m 0750 -o root -g sshflingd /etc/sshfling",
+            "ensure_package_dir /etc/sshfling 0750 root sshflingd",
             "chown root:sshflingd /etc/sshfling/sshflingd.env",
             "chmod 0640 /etc/sshfling/sshflingd.env",
         ],
@@ -202,7 +202,7 @@ KEY_CUSTODY_EXPECTATIONS = [
         "name": "RPM package preserves root custody for issuer config",
         "path": "packaging/build-rpm.sh",
         "markers": [
-            "install -d -m 0750 -o root -g sshflingd /etc/sshfling",
+            "ensure_package_dir /etc/sshfling 0750 root sshflingd",
             "chown root:sshflingd /etc/sshfling/sshflingd.env",
             "chmod 0640 /etc/sshfling/sshflingd.env",
         ],

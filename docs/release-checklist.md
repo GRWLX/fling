@@ -81,21 +81,20 @@ Required platform coverage evidence:
 | FPGA and SoC | Host CPU/OS control-plane evidence only, unless bitstream, accelerator, vendor board support package, or FPGA toolchain evidence is separately approved. |
 | Deferred targets | Exception ID, owner, customer impact, expiration, compensating control, and retest trigger. |
 
-## v0.1.12/vNext Follow-Up Checks
+## v0.1.13 Follow-Up Checks
 
-Use this sequence for the next enterprise release candidate. Replace `0.1.12`
-with the final package version if vNext is cut as a later patch.
+Use this sequence for the `v0.1.13` enterprise release candidate.
 
 ```bash
 git status --short --branch
 make clean
 make test
 make test-containers
-make release-package-rehearsal VERSION=0.1.12
-make release-security-scan VERSION=0.1.12
+make release-package-rehearsal VERSION=0.1.13
+make release-security-scan VERSION=0.1.13
 make release-security-evidence-validate
-make package VERSION=0.1.12
-make release-assets-evidence VERSION=0.1.12
+make package VERSION=0.1.13
+make release-assets-evidence VERSION=0.1.13
 make release-matrix-validate \
   RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
   RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json

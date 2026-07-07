@@ -669,11 +669,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
     existing_conf = conf_dir / "91-sshfling-password-sshflingexisting.conf"
     unmanaged_conf = conf_dir / "91-sshfling-password-sshflingunmanaged.conf"
     missing_file_conf = conf_dir / "91-sshfling-password-sshflingmissingfile.conf"
+    missing_expiry_conf = conf_dir / "91-sshfling-password-sshflingbadexpiry.conf"
     spoof_conf = conf_dir / "91-sshfling-password-root.conf"
     active_conf.write_text("# Managed by sshfling password grant for sshflingactive.\n", encoding="utf-8")
     expired_conf.write_text("# Managed by sshfling password grant for sshflingexpired.\n", encoding="utf-8")
     existing_conf.write_text("# Managed by sshfling password grant for sshflingexisting.\n", encoding="utf-8")
     unmanaged_conf.write_text("# Managed by sshfling password grant for sshflingunmanaged.\n", encoding="utf-8")
+    missing_expiry_conf.write_text("# Managed by sshfling password grant for sshflingbadexpiry.\n", encoding="utf-8")
     spoof_conf.write_text("# Managed by sshfling password grant for root.\n", encoding="utf-8")
 
     (grant_dir / "sshflingactive.json").write_text(json.dumps({
@@ -720,6 +722,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "created_user": True,
         "expires_at": now - 60,
         "config_path": str(missing_file_conf),
+    }), encoding="utf-8")
+    (grant_dir / "sshflingbadexpiry.json").write_text(json.dumps({
+        "username": "sshflingbadexpiry",
+        "managed_by": "sshfling",
+        "auth": "password",
+        "created_user": True,
+        "config_path": str(missing_expiry_conf),
     }), encoding="utf-8")
     (grant_dir / "sshflingspoof.json").write_text(json.dumps({
         "username": "root",
@@ -771,6 +780,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert missing_file["status"] == "pruned", missing_file
     assert missing_file["config"]["status"] == "missing", missing_file
     assert missing_file["user"]["would_delete"] is True, missing_file
+    missing_expiry = by_user["sshflingbadexpiry"]
+    assert missing_expiry["status"] == "skipped-invalid-metadata", missing_expiry
+    assert "config" not in missing_expiry, missing_expiry
+    assert "user" not in missing_expiry, missing_expiry
+    assert "metadata" not in missing_expiry, missing_expiry
     spoofed = by_user["root"]
     assert spoofed["status"] == "skipped-unmanaged", spoofed
     assert "config" not in spoofed, spoofed
@@ -906,6 +920,33 @@ with tempfile.TemporaryDirectory() as tmpdir:
         assert "requires --certificate" in exc.message, exc.message
     else:
         raise AssertionError("certificate setup was reachable without --certificate")
+
+    parser = sshfling.build_parser()
+    cert_issue_args = [
+        "cert",
+        "issue",
+        "--public-key",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest cert-issue",
+        "--username",
+        "sshflingcert",
+    ]
+    cert_issue_missing = parser.parse_args(cert_issue_args)
+    assert getattr(cert_issue_missing, "certificate", False) is False, cert_issue_missing
+    for argv in [
+        ["--certificate"] + cert_issue_args,
+        ["cert", "--certificate"] + cert_issue_args[1:],
+        cert_issue_args + ["--certificate"],
+    ]:
+        parsed = parser.parse_args(argv)
+        assert getattr(parsed, "certificate", False) is True, (argv, parsed)
+        assert parsed.func is sshfling.cmd_cert_issue, (argv, parsed)
+
+    try:
+        sshfling.cmd_cert_issue(cert_issue_missing)
+    except sshfling.SSHFlingError as exc:
+        assert "requires --certificate" in exc.message, exc.message
+    else:
+        raise AssertionError("cert issue was reachable without --certificate")
 
     cert_captured = {"calls": []}
     cert_originals = {

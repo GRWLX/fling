@@ -6,7 +6,7 @@ owner, repository name, and package version from the approved release record.
 
 ```bash
 BASE_URL="https://OWNER.github.io/REPO"
-VERSION="0.1.12"
+VERSION="0.1.13"
 ```
 
 SSHFling is proprietary commercial software. Installing, running,
@@ -25,6 +25,9 @@ agreement from GRWLX.
   SSH configuration created by `sshfling host install`, temporary password grant
   state, audit records, Python, OpenSSH, account-management tools, `procps`, or
   `util-linux`.
+- For production macOS pkg distribution, require an Apple Developer ID Installer
+  signature, notarization, stapling verification, and release-ticket evidence,
+  or record a time-bound exception before deployment.
 - Do not run dependency cleanup commands such as `apt autoremove`,
   `apt autopurge`, `dnf autoremove`, or `yum autoremove` as part of SSHFling
   package removal unless that cleanup is separately approved by fleet policy.
@@ -269,6 +272,26 @@ host Python or OpenSSH to an earlier state.
 
 ## macOS pkg
 
+Production build signing and notarization:
+
+```bash
+SSHFLING_VERSION="$VERSION" \
+SSHFLING_PKG_REQUIRE_SIGNING=1 \
+SSHFLING_PKG_SIGN_IDENTITY="Developer ID Installer: YOUR ORG (TEAMID)" \
+SSHFLING_PKG_REQUIRE_NOTARIZATION=1 \
+SSHFLING_PKG_NOTARY_PROFILE="sshfling-notary-profile" \
+./packaging/build-pkg.sh
+
+pkgutil --check-signature "dist/sshfling-${VERSION}.pkg"
+xcrun stapler validate "dist/sshfling-${VERSION}.pkg"
+spctl -a -vv -t install "dist/sshfling-${VERSION}.pkg"
+```
+
+Use `SSHFLING_PKG_SIGN_KEYCHAIN=/path/to/keychain` when the signing identity is
+not on the default keychain search path. Use
+`SSHFLING_PKG_SIGN_TIMESTAMP=none` only for offline test builds; production
+Developer ID signatures should carry a trusted timestamp.
+
 Install with the generated checksum-verifying helper:
 
 ```bash
@@ -279,7 +302,11 @@ sudo bash "$tmp/install-pkg.sh"
 sshfling --version
 ```
 
-Install a downloaded `.pkg` directly:
+The generated helper verifies the published SHA-256 checksum. For enterprise
+macOS deployment, also verify the package signature and notarization evidence
+from the approved release record before installation.
+
+Install a downloaded signed `.pkg` directly:
 
 ```bash
 tmp="$(mktemp -d)"
@@ -288,6 +315,9 @@ curl -fsSL "${BASE_URL}/downloads/sshfling-${VERSION}.pkg" -o "$tmp/sshfling-${V
 curl -fsSL "${BASE_URL}/downloads/SHA256SUMS" -o "$tmp/SHA256SUMS"
 grep "  sshfling-${VERSION}.pkg$" "$tmp/SHA256SUMS" > "$tmp/sshfling.SHA256SUMS"
 (cd "$tmp" && shasum -a 256 -c sshfling.SHA256SUMS)
+pkgutil --check-signature "$tmp/sshfling-${VERSION}.pkg"
+xcrun stapler validate "$tmp/sshfling-${VERSION}.pkg"
+spctl -a -vv -t install "$tmp/sshfling-${VERSION}.pkg"
 sudo installer -pkg "$tmp/sshfling-${VERSION}.pkg" -target /
 ```
 
@@ -300,9 +330,13 @@ sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&1 || true
 ```
 
 The pkg installs `/usr/local/bin/sshfling`, `/usr/local/share/sshfling`, and a
-default `/etc/sshfling/policy.json`. Uninstall intentionally preserves
-`/etc/sshfling` for policy, CA material, and operator-managed configuration.
-The pkg does not bundle Python or OpenSSH.
+packaged default policy at
+`/usr/local/share/sshfling/defaults/policy.json`. Its postinstall script creates
+`/etc/sshfling/policy.json` only when that file is absent; install and upgrade
+do not overwrite an existing operator-managed policy file. Uninstall
+intentionally preserves `/etc/sshfling` for policy, CA material, and
+operator-managed configuration, then forgets the package receipt. The pkg does
+not keep separate original-state records and does not bundle Python or OpenSSH.
 
 ## Windows MSI
 
@@ -314,14 +348,15 @@ $BaseUrl = "https://OWNER.github.io/REPO"
 $Installer = Join-Path $env:TEMP "sshfling-install.ps1"
 Invoke-WebRequest -Uri "$BaseUrl/windows/install.ps1" -OutFile $Installer
 & $Installer
-sshfling --version
+$Command = Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"
+& $Command --version
 ```
 
 Install a downloaded MSI directly:
 
 ```powershell
 $BaseUrl = "https://OWNER.github.io/REPO"
-$Version = "0.1.12"
+$Version = "0.1.13"
 $Msi = Join-Path $env:TEMP "sshfling-$Version.msi"
 $Sums = Join-Path $env:TEMP "sshfling-SHA256SUMS"
 Invoke-WebRequest -Uri "$BaseUrl/downloads/sshfling-$Version.msi" -OutFile $Msi
@@ -332,6 +367,8 @@ $Expected = $ExpectedLine.Split()[0].ToLowerInvariant()
 $Actual = (Get-FileHash -Algorithm SHA256 -Path $Msi).Hash.ToLowerInvariant()
 if ($Actual -ne $Expected) { throw "SHA-256 mismatch for sshfling-$Version.msi" }
 Start-Process msiexec.exe -Wait -ArgumentList "/i", $Msi, "/qn", "/norestart"
+$Command = Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"
+& $Command --version
 ```
 
 Uninstall with the generated helper:
@@ -372,7 +409,7 @@ Install for the current user:
 
 ```powershell
 $BaseUrl = "https://OWNER.github.io/REPO"
-$Version = "0.1.12"
+$Version = "0.1.13"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\SSHFling"
 $Zip = Join-Path $env:TEMP "sshfling-$Version-windows.zip"
 $Sums = Join-Path $env:TEMP "sshfling-SHA256SUMS"
@@ -497,7 +534,7 @@ normal maintainer account, review, signing, and submission process.
 
 | Ecosystem | Install command after manifest import or approval | Uninstall command |
 | --- | --- | --- |
-| Arch / AUR | `curl -fsSLO "${BASE_URL}/arch/PKGBUILD" && makepkg -si` | `sudo pacman -Rns sshfling` |
+| Arch / AUR | `curl -fsSLO "${BASE_URL}/arch/PKGBUILD" && makepkg -si` | `sudo pacman -R sshfling` |
 | Alpine | `abuild -r` from the generated `APKBUILD`, then `sudo apk add path/to/sshfling-${VERSION}-r0.apk` | `sudo apk del sshfling` |
 | FreeBSD Ports | `cd /usr/ports/security/sshfling && sudo make install clean` | `sudo pkg delete sshfling` |
 | OpenBSD Ports | `cd /usr/ports/security/sshfling && doas make install` | `doas pkg_delete sshfling` |
@@ -505,7 +542,7 @@ normal maintainer account, review, signing, and submission process.
 | Nix / NixOS | `NIXPKGS_ALLOW_UNFREE=1 nix profile install --impure ./nix` | `nix profile remove sshfling` |
 | Guix | `guix package -f guix/sshfling.scm` | `guix remove sshfling` |
 | Void Linux | `./xbps-src pkg sshfling` then `sudo xbps-install --repository hostdir/binpkgs sshfling` | `sudo xbps-remove sshfling` |
-| Gentoo | `sudo emerge --ask app-admin/sshfling` | `sudo emerge --depclean app-admin/sshfling` |
+| Gentoo | `sudo emerge --ask app-admin/sshfling` | `sudo emerge --unmerge app-admin/sshfling` |
 | Slackware | `sudo sh slackware/sshfling.SlackBuild` then `sudo installpkg /tmp/sshfling-${VERSION}-*.txz` | `sudo removepkg sshfling` |
 | openSUSE / OBS | `sudo zypper install sshfling` after OBS publication | `sudo zypper remove sshfling` |
 | Snapcraft | `snapcraft` then `sudo snap install ./sshfling_*.snap --dangerous` | `sudo snap remove sshfling` |
@@ -548,6 +585,11 @@ Remove a local source checkout install, if used:
 ```bash
 ./scripts/uninstall-local.sh
 ```
+
+If `scripts/install-local.sh` was run with a custom `PREFIX`, run uninstall with
+the same `PREFIX`. The local helper removes the fixed local-install file paths it
+created under that prefix; it does not record or restore preexisting files that a
+local install may have overwritten.
 
 Published container images, when enabled, use GitHub Container Registry names:
 

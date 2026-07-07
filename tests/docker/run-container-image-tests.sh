@@ -154,14 +154,48 @@ test_compose_images() {
 test_deb_image() {
   local image="$1"
   local name
+  log "testing DEB package lifecycle on $image"
   start_container "$image"
   name="$last_container"
   copy_validate "$name"
   docker cp "dist/sshfling_${version}_all.deb" "$name:/tmp/sshfling.deb"
   docker exec "$name" sh -lc "set -eu
+    assert_sshflingd_account_present() {
+      getent passwd sshflingd >/dev/null
+      getent group sshflingd >/dev/null
+      test \"\$(getent passwd sshflingd | cut -d: -f6)\" = '/var/lib/sshflingd'
+      case \"\$(getent passwd sshflingd | cut -d: -f7)\" in
+        */nologin) ;;
+        *) echo 'sshflingd account does not use nologin shell' >&2; exit 1 ;;
+      esac
+    }
+    assert_sshflingd_account_absent() {
+      if getent passwd sshflingd >/dev/null; then
+        echo 'package-created sshflingd user survived cleanup' >&2
+        exit 1
+      fi
+      if getent group sshflingd >/dev/null; then
+        echo 'package-created sshflingd group survived cleanup' >&2
+        exit 1
+      fi
+    }
+    create_preexisting_sshflingd_account() {
+      nologin=/usr/sbin/nologin
+      if [ ! -x \"\$nologin\" ] && [ -x /sbin/nologin ]; then
+        nologin=/sbin/nologin
+      fi
+      groupadd --system sshflingd 2>/dev/null || groupadd -r sshflingd
+      useradd --system --gid sshflingd --home-dir /var/lib/sshflingd --shell \"\$nologin\" --no-create-home sshflingd 2>/dev/null \
+        || useradd -r -g sshflingd -d /var/lib/sshflingd -s \"\$nologin\" -M sshflingd
+      install -d -m 0750 -o sshflingd -g sshflingd /var/lib/sshflingd
+      touch /var/lib/sshflingd/preexisting
+      chown sshflingd:sshflingd /var/lib/sshflingd/preexisting
+    }
     apt-get update >/dev/null
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold /tmp/sshfling.deb >/dev/null
     sshfling --version | grep -Fx 'sshfling $version'
+    assert_sshflingd_account_present
+    test -d /var/lib/sshflingd
     test -f /var/lib/sshfling/package-state/install-state
     test ! -e /var/lib/sshflingd/package-state/install-state
     test \"\$(stat -c '%u:%g' /var/lib/sshfling/package-state)\" = '0:0'
@@ -172,23 +206,66 @@ test_deb_image() {
       echo 'sshfling command survived deb package removal' >&2
       exit 1
     fi
+    assert_sshflingd_account_present
     grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold /tmp/sshfling.deb >/dev/null
     grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
     sh /tmp/validate-cli.sh sshfling '$version'
     DEBIAN_FRONTEND=noninteractive apt-get purge -y sshfling >/dev/null
     test ! -e /var/lib/sshfling/package-state/install-state
-    test ! -e /var/lib/sshflingd/package-state/install-state"
+    test ! -e /var/lib/sshflingd/package-state/install-state
+    test ! -e /var/lib/sshflingd
+    assert_sshflingd_account_absent
+
+    create_preexisting_sshflingd_account
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confold /tmp/sshfling.deb >/dev/null
+    assert_sshflingd_account_present
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y sshfling >/dev/null
+    test ! -e /var/lib/sshfling/package-state/install-state
+    test -e /var/lib/sshflingd/preexisting
+    assert_sshflingd_account_present"
 }
 
 test_rpm_image() {
   local image="$1"
   local name
+  log "testing RPM package lifecycle on $image"
   start_container "$image"
   name="$last_container"
   copy_validate "$name"
   docker cp "dist/sshfling-${version}-1.noarch.rpm" "$name:/tmp/sshfling.rpm"
   docker exec "$name" sh -lc "set -eu
+    assert_sshflingd_account_present() {
+      getent passwd sshflingd >/dev/null
+      getent group sshflingd >/dev/null
+      test \"\$(getent passwd sshflingd | cut -d: -f6)\" = '/var/lib/sshflingd'
+      case \"\$(getent passwd sshflingd | cut -d: -f7)\" in
+        */nologin) ;;
+        *) echo 'sshflingd account does not use nologin shell' >&2; exit 1 ;;
+      esac
+    }
+    assert_sshflingd_account_absent() {
+      if getent passwd sshflingd >/dev/null; then
+        echo 'package-created sshflingd user survived cleanup' >&2
+        exit 1
+      fi
+      if getent group sshflingd >/dev/null; then
+        echo 'package-created sshflingd group survived cleanup' >&2
+        exit 1
+      fi
+    }
+    create_preexisting_sshflingd_account() {
+      nologin=/usr/sbin/nologin
+      if [ ! -x \"\$nologin\" ] && [ -x /sbin/nologin ]; then
+        nologin=/sbin/nologin
+      fi
+      groupadd --system sshflingd 2>/dev/null || groupadd -r sshflingd
+      useradd --system --gid sshflingd --home-dir /var/lib/sshflingd --shell \"\$nologin\" --no-create-home sshflingd 2>/dev/null \
+        || useradd -r -g sshflingd -d /var/lib/sshflingd -s \"\$nologin\" -M sshflingd
+      install -d -m 0750 -o sshflingd -g sshflingd /var/lib/sshflingd
+      touch /var/lib/sshflingd/preexisting
+      chown sshflingd:sshflingd /var/lib/sshflingd/preexisting
+    }
     if command -v dnf >/dev/null 2>&1; then
       package_install='dnf install -y /tmp/sshfling.rpm'
     else
@@ -196,6 +273,8 @@ test_rpm_image() {
     fi
     \$package_install >/dev/null
     sshfling --version | grep -Fx 'sshfling $version'
+    assert_sshflingd_account_present
+    test -d /var/lib/sshflingd
     test -f /var/lib/sshfling/package-state/install-state
     test ! -e /var/lib/sshflingd/package-state/install-state
     test \"\$(stat -c '%u:%g' /var/lib/sshfling/package-state)\" = '0:0'
@@ -206,12 +285,33 @@ test_rpm_image() {
       echo 'sshfling command survived rpm package removal' >&2
       exit 1
     fi
-    test ! -e /var/lib/sshfling/package-state/install-state
+    test -f /var/lib/sshfling/package-state/install-state
     test ! -e /var/lib/sshfling/rpm-preserve-config
+    assert_sshflingd_account_present
     grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
     \$package_install >/dev/null
     grep -Fq '\"max_time_seconds\":123' /etc/sshfling/policy.json
-    sh /tmp/validate-cli.sh sshfling '$version'"
+    sh /tmp/validate-cli.sh sshfling '$version'
+
+    rm -f /etc/sshfling/policy.json /etc/sshfling/policy.json.rpmnew /etc/sshfling/policy.json.rpmsave /etc/sshfling/sshflingd.env /etc/sshfling/sshflingd.env.rpmnew /etc/sshfling/sshflingd.env.rpmsave
+    rmdir /etc/sshfling
+    rpm -e sshfling >/dev/null
+    test ! -e /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshfling/rpm-preserve-config
+    test ! -e /var/lib/sshflingd
+    test ! -e /etc/sshfling
+    assert_sshflingd_account_absent
+
+    create_preexisting_sshflingd_account
+    \$package_install >/dev/null
+    assert_sshflingd_account_present
+    rm -f /etc/sshfling/policy.json /etc/sshfling/policy.json.rpmnew /etc/sshfling/policy.json.rpmsave /etc/sshfling/sshflingd.env /etc/sshfling/sshflingd.env.rpmnew /etc/sshfling/sshflingd.env.rpmsave
+    rmdir /etc/sshfling
+    rpm -e sshfling >/dev/null
+    test ! -e /var/lib/sshfling/package-state/install-state
+    test ! -e /var/lib/sshfling/rpm-preserve-config
+    test -e /var/lib/sshflingd/preexisting
+    assert_sshflingd_account_present"
 }
 
 test_opensuse() {

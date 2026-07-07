@@ -1,10 +1,10 @@
 # Changelog
 
-## vNext - Unreleased
+## v0.1.13 - 2026-07-07
 
-Status: not tagged or published from the current working tree. Treat these notes
-as release-preparation guidance until the changes are committed, validated, and
-tagged.
+Status: release candidate for the hardened enterprise package publishing pass.
+Use the final GitHub release, tag, and workflow runs as the authoritative
+evidence after `v0.1.13` is published.
 
 ### Prepared
 
@@ -19,12 +19,13 @@ tagged.
   bounded workflow timeouts, Windows MSI metadata, macOS package metadata,
   public repository install paths, and community package manifests.
 - Added GitHub Packages container publishing workflow coverage after the
-  `v0.1.12` tag.
+  `v0.1.12` tag and prepared the follow-up `v0.1.13` release from the hardened
+  source commit.
 
 ### Evidence Available
 
-- Source version in `bin/sshfling` is `0.1.12`.
-- `v0.1.12` is tagged at commit
+- Source version in `bin/sshfling` is `0.1.13`.
+- Previous published release `v0.1.12` is tagged at commit
   `58b23b5fa9b90491c41b41fc206d8e907b00e8df`.
 - GitHub release `v0.1.12` is published at
   https://github.com/GRWLX/sshfling/releases/tag/v0.1.12 with eight assets:
@@ -36,16 +37,15 @@ tagged.
   `make release-security-scan` and validated with
   `make release-security-evidence-validate`.
 
-### Known Blockers Before Publishing
+### Evidence To Attach Or Except Before Enterprise Claims
 
-- The release candidate must be built from a clean, final commit. The current
-  checkout contains uncommitted vNext changes.
-- The tag-scoped `Release packages with public web` run failed. Tag-scoped
-  `Package install tests` and `Cross OS validation` runs were not found in the
-  filtered GitHub run lists checked on 2026-07-06.
-- Package artifact checksums, generated evidence files, repository signing
-  fingerprint, Pages deployment ID, release approval, and any accepted workflow
-  commit mismatches are not recorded in this changelog.
+- The release candidate must be built from a clean, final commit and matching
+  `v0.1.13` tag.
+- Attach `v0.1.13` workflow run URLs for release packages, public package web,
+  package install tests, cross-OS validation, and container image tests.
+- Attach `v0.1.13` package artifact checksums, generated evidence files,
+  repository signing fingerprint, Pages deployment ID, release approval, and
+  any accepted workflow exceptions.
 - macOS notarization and Windows Authenticode evidence must be attached or
   formally excepted before enterprise publication claims.
 - Optional external scanners are not required by the baseline generator unless
