@@ -7,15 +7,15 @@ release.
 
 | Area | Status | Required action |
 | --- | --- | --- |
-| Versioning | Ready in repo | Use a three-component numeric version and a matching `vX.Y.Z` tag. |
-| Linux packages | Ready in repo | Validate `.deb`, `.rpm`, APT metadata, RPM metadata, and repository signing. |
+| Versioning | Source gate available | Use a three-component numeric version and a matching `vX.Y.Z` tag. |
+| Linux packages | Source gate available | Validate `.deb`, `.rpm`, APT metadata, RPM metadata, and repository signing for the exact release SHA. |
 | macOS package | Build/signing hooks available | Configure Developer ID signing/notarization secrets and attach `pkgutil`, `notarytool`, and stapler evidence if required by policy. |
-| Windows MSI | Build available | Add or run Authenticode signing/verification and attach `signtool` evidence if required by policy. |
-| Public package site | Ready in repo | Enable GitHub Pages from Actions and run the public-web workflow. |
+| Windows MSI | Build/signing hooks available | Configure Authenticode signing material and attach `signtool` or `Get-AuthenticodeSignature` evidence if required by policy. |
+| Public package site | Source gate available | Enable protected GitHub Pages deployment from Actions and run the public-web workflow. |
 | Community manifests | Generated | Submit manually where ecosystem review or maintainer accounts are required. |
-| License signaling | Ready in repo | Confirm commercial license approval before redistribution. |
-| Release validation | Ready in repo | Run package install tests and cross-OS validation for each published version. |
-| Access behavior contract | Ready in repo | Confirm docs and release notes state password-by-default, explicit certificate mode, access-level classification limits, prune limits, and uninstall cleanup boundaries. |
+| License signaling | Source markers available | Confirm commercial license approval before redistribution. |
+| Release validation | Evidence required | Run package install tests and cross-OS validation for each published version. |
+| Access behavior contract | Source gate available | Confirm docs and release notes state password-by-default with explicit `-t/--time`, explicit certificate mode, access-level classification limits, prune selector requirements, and uninstall cleanup boundaries. |
 | Platform coverage evidence | Partial | Keep a compact evidence-backed declaration for OS versions, Python/OpenSSH versions, CPU architectures, hardware classes, ARM/IoT targets, and FPGA/SoC host control-plane scope. |
 | Compliance evidence | Partial | Use the release evidence packet for SOC 2, ISO 27001:2022, and NIST SP 800-53 Rev. 5 mapping; do not claim certification from repo evidence alone. |
 | Rollback | Operator-owned | Prefer a fixed forward release after external publication. Republish only before consumption or for package-site generation defects. |
@@ -39,11 +39,13 @@ A release is ready to publish when all of the following are true:
   are required for this release.
 - The support owner has reviewed install, uninstall, and cleanup instructions.
 - The user-facing docs and release notes match implemented access behavior:
-  password mode is the default, certificate mode requires `--certificate`,
+  password mode is the default access type but grants require explicit
+  `-t/--time`, certificate mode requires `--certificate` and an existing CA,
   certificate-specific options fail without `--certificate`, access levels are
   policy classifications rather than privilege assignment, `password prune`
-  only removes expired tracked password grants, and package uninstall does not
-  promise dependency-state rollback or original host-state restoration.
+  requires `--all` or `--username USER` and only removes expired tracked
+  password grants, and package uninstall does not promise dependency-state
+  rollback or original host-state restoration.
 
 Do not publish when:
 

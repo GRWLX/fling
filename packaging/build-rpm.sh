@@ -320,7 +320,16 @@ restore_config() {
 
   rpmsave="\$dst.rpmsave"
   if [ -f "\$rpmsave" ]; then
-    rm -f "\$rpmsave"
+    if python3 - "\$rpmsave" "\$src" <<'PY'
+from pathlib import Path
+import sys
+sys.exit(0 if Path(sys.argv[1]).read_bytes() == Path(sys.argv[2]).read_bytes() else 1)
+PY
+    then
+      rm -f "\$rpmsave"
+    else
+      echo "sshfling: preserving existing \$rpmsave" >&2
+    fi
   fi
 
   if getent group "\$group" >/dev/null 2>&1; then
@@ -482,8 +491,8 @@ exit 0
 
 %files
 %dir %attr(0750,root,sshflingd) /etc/sshfling
-%config(noreplace) %attr(0644,root,root) /etc/sshfling/policy.json
-%config(noreplace) %attr(0640,root,sshflingd) /etc/sshfling/sshflingd.env
+%config(missingok,noreplace) %attr(0644,root,root) /etc/sshfling/policy.json
+%config(missingok,noreplace) %attr(0640,root,sshflingd) /etc/sshfling/sshflingd.env
 %attr(0755,root,root) /usr/bin/sshfling
 /usr/share/sshfling/templates
 /usr/share/doc/sshfling/README.md

@@ -717,7 +717,7 @@ cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scrip
 
 %files
 %{_bindir}/sshfling
-%config(noreplace) %{_sysconfdir}/sshfling/policy.json
+%config(missingok,noreplace) %{_sysconfdir}/sshfling/policy.json
 %{_datadir}/sshfling/templates
 %license %{_licensedir}/%{name}/LICENSE
 %doc %{_docdir}/%{name}/README.md

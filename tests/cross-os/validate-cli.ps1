@@ -144,10 +144,42 @@ try {
   if ($versionOutput -ne "sshfling $Version") {
     Fail "unexpected version output: $versionOutput"
   }
+  foreach ($tool in @("ssh", "ssh-keygen", "ssh-keyscan")) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+      Fail "missing OpenSSH client tool: $tool"
+    }
+  }
+  $sshVersion = (& ssh -V 2>&1 | Out-String).Trim()
+  Write-Output "ssh version: $sshVersion"
+  if (Get-Command sshd -ErrorAction SilentlyContinue) {
+    $sshdVersion = (& sshd -V 2>&1 | Out-String).Trim()
+    Write-Output "sshd version: $sshdVersion"
+  }
+  else {
+    Write-Output "sshd version: unavailable"
+  }
 
   $helpOutput = (& $CommandPath --help | Out-String)
   if (-not $helpOutput.Contains("Grant or kill temporary SSH access.")) {
     Fail "help output missing expected description"
+  }
+
+  $bareSetupJson = (& $CommandPath --json --dry-run 2>$null | Out-String)
+  if ($LASTEXITCODE -eq 0) {
+    Fail "bare setup without -t unexpectedly succeeded"
+  }
+  $bareSetup = $bareSetupJson | ConvertFrom-Json
+  if (-not $bareSetup.error.message.Contains("explicit -t/--time")) {
+    Fail "bare setup error did not require explicit lifetime"
+  }
+
+  $bareCertSetupJson = (& $CommandPath --json --certificate --dry-run 2>$null | Out-String)
+  if ($LASTEXITCODE -eq 0) {
+    Fail "certificate setup without -t unexpectedly succeeded"
+  }
+  $bareCertSetup = $bareCertSetupJson | ConvertFrom-Json
+  if (-not $bareCertSetup.error.message.Contains("explicit -t/--time")) {
+    Fail "certificate setup error did not require explicit lifetime"
   }
 
   $env:SSHFLING_WEB_PASSWORD = "cross-test-password"
@@ -245,6 +277,8 @@ try {
   foreach ($needle in @(
       "PreferredAuthentications=password,keyboard-interactive",
       "PubkeyAuthentication=no",
+      "ForwardAgent=no",
+      "ClearAllForwardings=yes",
       "-p 2222",
       "s123@example.invalid",
       "whoami"
@@ -435,6 +469,7 @@ def setup_args(**overrides):
         "time": 60,
         "seconds": None,
         "json": True,
+        "dry_run": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -567,6 +602,19 @@ with tempfile.TemporaryDirectory() as tmpdir:
         if metadata.get("config_path") is None:
             metadata.pop("config_path", None)
         (grant_dir / f"{username}.json").write_text(json.dumps(metadata), encoding="utf-8")
+    identity_conf = conf_dir / "91-sshfling-password-sshflingidentity.conf"
+    identity_conf.write_text("# Managed by sshfling password grant for sshflingidentity.\n", encoding="utf-8")
+    (grant_dir / "sshflingidentity.json").write_text(json.dumps({
+        "username": "sshflingidentity",
+        "managed_by": "sshfling",
+        "auth": "password",
+        "created_user": True,
+        "expires_at": now - 60,
+        "config_path": str(identity_conf),
+        "user_uid": 12345,
+        "user_gid": 12345,
+        "user_home": "/home/sshflingidentity-old",
+    }), encoding="utf-8")
     spoof_conf = conf_dir / "91-sshfling-password-root.conf"
     spoof_conf.write_text("# Managed by sshfling password grant for root.\n", encoding="utf-8")
     (grant_dir / "sshflingspoof.json").write_text(json.dumps({
@@ -581,7 +629,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "username": "root",
         "managed_by": "sshfling",
         "auth": "password",
-        "created_user": True,
+        "created_user": False,
         "expires_at": now - 60,
         "config_path": str(spoof_conf),
     }), encoding="utf-8")
@@ -592,7 +640,14 @@ with tempfile.TemporaryDirectory() as tmpdir:
         stdout = ""
 
     original_run = sshfling.run
+    original_unix_user_identity = sshfling.unix_user_identity
     sshfling.run = lambda *args, **kwargs: UserExists()
+    sshfling.unix_user_identity = lambda username: {
+        "username": username,
+        "uid": 67890,
+        "gid": 67890,
+        "home": f"/home/{username}-new",
+    } if username == "sshflingidentity" else {}
     try:
         results = sshfling.prune_password_grants(
             grant_dir,
@@ -602,6 +657,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
     finally:
         sshfling.run = original_run
+        sshfling.unix_user_identity = original_unix_user_identity
 
     by_user = {item["username"]: item for item in results}
     assert by_user["sshflingactive"]["status"] == "active", by_user
@@ -627,11 +683,19 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert missing_file["status"] == "pruned", missing_file
     assert missing_file["config"]["status"] == "missing", missing_file
     assert missing_file["user"]["would_delete"] is True, missing_file
+    identity = by_user["sshflingidentity"]
+    assert identity["status"] == "pruned", identity
+    assert identity["config"]["would_remove"] is True, identity
+    assert identity["user"]["status"] == "skipped-user-mismatch", identity
+    assert identity["user"]["expected_identity"]["uid"] == 12345, identity
+    assert identity["user"]["current_identity"]["uid"] == 67890, identity
     root_items = [item for item in results if item.get("username") == "root"]
     assert any(item["status"] == "skipped-unmanaged" for item in root_items), root_items
     root_equivalent = next(item for item in root_items if item["status"] == "skipped-root-equivalent")
+    assert Path(root_equivalent["metadata_path"]).name == "root.json", root_equivalent
     assert "config" not in root_equivalent, root_equivalent
     assert "user" not in root_equivalent, root_equivalent
+    assert "metadata" not in root_equivalent, root_equivalent
 
     sshfling.run = lambda *args, **kwargs: UserExists()
     try:
@@ -664,7 +728,17 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert expired_results[0]["user"]["would_delete"] is True, expired_results
     assert len(root_results) == 1, root_results
     assert root_results[0]["status"] == "skipped-root-equivalent", root_results
+    assert Path(root_results[0]["metadata_path"]).name == "root.json", root_results
+    assert "config" not in root_results[0], root_results
     assert "user" not in root_results[0], root_results
+    assert "metadata" not in root_results[0], root_results
+
+    try:
+        sshfling.prune_password_grants(grant_dir, delete_users=True, dry_run=True)
+    except sshfling.SSHFlingError as exc:
+        assert "exactly one" in exc.message, exc.message
+    else:
+        raise AssertionError("password prune without --username or --all was accepted")
 
     captured = {}
     originals = {
@@ -849,7 +923,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
     cert_captured = {"calls": []}
     cert_originals = {
         "require_root": sshfling.require_root,
-        "create_ca_key": sshfling.create_ca_key,
         "create_temp_client_key": sshfling.create_temp_client_key,
         "sign_user_certificate": sshfling.sign_user_certificate,
         "detect_server_host": sshfling.detect_server_host,
@@ -859,15 +932,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
     try:
         cert_root = root / "cert-flow"
         cert_root.mkdir()
+        ca_key = cert_root / "ca"
+        ca_pub = cert_root / "ca.pub"
+        ca_key.write_text("stub ca key\n", encoding="utf-8")
+        ca_pub.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest ca\n", encoding="utf-8")
         sshfling.require_root = lambda action: None
-        def fake_create_ca_key(args):
-            cert_captured["calls"].append("create_ca_key")
-            return {
-                "ok": True,
-                "status": "created",
-                "ca_key": str(args.ca_key),
-                "ca_public_key": str(args.ca_key) + ".pub",
-            }
         def fake_create_temp_client_key(username, session_dir):
             cert_captured["calls"].append("create_temp_client_key")
             key_dir = Path(session_dir) / username
@@ -893,7 +962,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
                 "force_command": "stub",
                 "access_level": kwargs["access_level"] or "standard",
             }
-        sshfling.create_ca_key = fake_create_ca_key
         sshfling.create_temp_client_key = fake_create_temp_client_key
         sshfling.sign_user_certificate = fake_sign_user_certificate
         sshfling.detect_server_host = lambda: "203.0.113.10"
@@ -902,13 +970,41 @@ with tempfile.TemporaryDirectory() as tmpdir:
         assert sshfling.cmd_setup(setup_args(
             certificate=True,
             username="sshflingcert",
-            ca_key=str(cert_root / "ca"),
+            ca_key=str(ca_key),
             session_dir=str(cert_root / "sessions"),
         )) == 0
+
+        missing_ca = cert_root / "missing-ca"
+        try:
+            sshfling.cmd_setup(setup_args(
+                certificate=True,
+                username="sshflingmissingca",
+                ca_key=str(missing_ca),
+                session_dir=str(cert_root / "missing-sessions"),
+            ))
+        except sshfling.SSHFlingError as exc:
+            assert "CA keypair does not exist" in exc.message, exc.message
+        else:
+            raise AssertionError("certificate setup created or accepted a missing CA")
+
+        dry_run_dir = cert_root / "dry-run-sessions"
+        try:
+            sshfling.cmd_setup(setup_args(
+                certificate=True,
+                username="sshflingdryrun",
+                ca_key=str(ca_key),
+                session_dir=str(dry_run_dir),
+                dry_run=True,
+            ))
+        except sshfling.SSHFlingError as exc:
+            assert "does not support --dry-run" in exc.message, exc.message
+        else:
+            raise AssertionError("certificate setup --dry-run was accepted")
+        assert not dry_run_dir.exists(), dry_run_dir
     finally:
         for name, value in cert_originals.items():
             setattr(sshfling, name, value)
-    assert cert_captured["calls"] == ["create_ca_key", "create_temp_client_key", "sign_user_certificate"], cert_captured
+    assert cert_captured["calls"] == ["create_temp_client_key", "sign_user_certificate"], cert_captured
     assert cert_captured["sign_kwargs"]["principal"] == "sshflingcert", cert_captured
     assert cert_captured["sign_kwargs"]["seconds"] == 60, cert_captured
     assert "cert-flow" in cert_captured["sign_kwargs"]["public_key_text"], cert_captured
@@ -916,7 +1012,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert cert_payload["ok"] is True, cert_payload
     assert cert_payload["generated_key"] is True, cert_payload
     assert cert_payload["private_key"], cert_payload
-    assert cert_payload["ca"]["status"] == "created", cert_payload
+    assert cert_payload["ca"]["status"] == "exists", cert_payload
     assert cert_payload["access_level"] == "standard", cert_payload
     assert "password" not in cert_payload, cert_payload
 

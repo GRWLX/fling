@@ -21,13 +21,28 @@ Use this checklist before publishing enterprise package artifacts.
 - Remove interpreter caches and local byproducts such as `__pycache__/`, `.pytest_cache/`, and local logs.
 - Check that no local secrets or package credentials are staged: `.env`, `.env.*`, private keys, package-manager credentials, and non-placeholder `secrets/` files.
 - Run `make clean` before rebuilding local package artifacts from the exact candidate commit.
+- `make release-security-scan` intentionally refuses dirty worktrees. For a
+  local, non-release scan before cleanup, run
+  `make release-security-scan-local VERSION=X.Y.Z`; it passes `--allow-dirty`
+  and writes ignored evidence under `build/release-security-local/`. Do not use
+  dirty-tree scan output as release evidence.
 
 ## Release Notes
 
 - Use GitHub generated release notes as a starting point, then add a short enterprise-facing summary.
 - Call out security-relevant behavior changes, install or uninstall changes, upgrade impact, policy defaults, and compatibility notes.
-- Confirm access behavior is described accurately: password access is the default, certificate access requires `--certificate`, and certificate-specific setup options are not implicit.
-- Confirm cleanup behavior is described accurately: `password prune` removes expired tracked grants only, `--all` does not remove active grants, `--delete-users` only deletes expired SSHFling-created users, break-glass existing-user grants are locked/expired but not deleted, root-equivalent users are never deleted from password-grant metadata or host-user markers, and package uninstall preserves `/etc/sshfling` configuration without restoring dependency state or original host configuration.
+- Confirm access behavior is described accurately: password access is the
+  default access type, temporary grants require explicit `-t/--time`,
+  certificate access requires `--certificate`, certificate setup requires an
+  existing CA keypair, and certificate-specific setup options are not implicit.
+- Confirm cleanup behavior is described accurately: `password prune` requires
+  exactly one selector (`--all` or `--username USER`), removes expired tracked
+  grants only, `--all` does not remove active grants, `--delete-users` only
+  deletes expired SSHFling-created users, break-glass existing-user grants are
+  locked/expired but not deleted, root-equivalent users are never mutated from
+  password-grant metadata or host-user markers, and package uninstall preserves
+  `/etc/sshfling` configuration without restoring dependency state or original
+  host configuration.
 - Confirm destructive CA operations are described accurately:
   `sshfling ca init --force` replaces the existing CA keypair and requires a
   planned host trust update and certificate reissue.
@@ -111,6 +126,11 @@ matrices and manifests in ignored release-evidence paths; do not stage them as
 tracked source files. If optional external scanners are skipped, record that as
 a release-ticket limitation unless `make release-security-scan-strict` is the
 approved gate.
+
+For exploratory local checks on a dirty checkout, use
+`make release-security-scan-local VERSION=0.1.13` instead of the release
+sequence above. Clean CI and tag/release workflow scans must not pass
+`--allow-dirty`.
 
 If GHCR images are in scope, attach the GitHub Packages validation run, image
 digests, cosign signing evidence, SBOM/provenance evidence, and the protected

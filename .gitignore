@@ -35,6 +35,7 @@ docs/release/enterprise-release-readiness-checklist.md
 docs/release/enterprise-release-matrix.csv
 docs/release/enterprise-release-summary.md
 docs/release/enterprise-release-evidence/
+security_best_practices_report.md
 *.deb
 *.rpm
 *.msi

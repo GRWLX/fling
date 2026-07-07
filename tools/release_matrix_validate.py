@@ -24,6 +24,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PASS = "PASS"
 FAIL = "FAIL"
 BLOCKED = "BLOCKED"
+SKIPPED = "SKIPPED"
 PLACEHOLDERS = {"", "NONE", "NOT_APPLICABLE", "N/A", "NA", "TBD", "TODO", "PENDING", "MISSING"}
 
 
@@ -229,7 +230,7 @@ def status_for_row(row: dict[str, str]) -> str:
     return (row.get("readiness_status") or row.get("result") or row.get("status") or "").strip().upper()
 
 
-def validate_matrix(matrix_path: Path, manifest_path: Path, repo_root: Path, max_errors: int) -> int:
+def validate_matrix(matrix_path: Path, manifest_path: Path, repo_root: Path, max_errors: int, require_pass: bool) -> int:
     manifest = load_manifest(manifest_path)
     counts: Counter[str] = Counter()
     errors: list[str] = []
@@ -270,6 +271,13 @@ def validate_matrix(matrix_path: Path, manifest_path: Path, repo_root: Path, max
                 actual = row.get("actual_result", "").strip()
                 if not actual or actual in {"NONE", "NOT_APPLICABLE", "TBD"}:
                     row_errors.append(f"{display_row_id}: FAIL row is missing actual_result")
+            elif status == SKIPPED:
+                pass
+            else:
+                row_errors.append(f"{display_row_id}: unsupported status {status or '<blank>'}")
+
+            if require_pass and status != PASS:
+                row_errors.append(f"{display_row_id}: {status or '<blank>'} row is not allowed by --require-pass")
 
             if len(errors) < max_errors:
                 errors.extend(row_errors[: max_errors - len(errors)])
@@ -352,6 +360,7 @@ def main() -> int:
     parser.add_argument("--manifest", default="docs/release/evidence-manifest.json")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--max-errors", type=int, default=50)
+    parser.add_argument("--require-pass", action="store_true")
     parser.add_argument("--generate-manifest", action="store_true")
     parser.add_argument("--evidence-root", default="docs/release/enterprise-release-evidence")
     parser.add_argument("--source-commit")
@@ -379,6 +388,7 @@ def main() -> int:
         manifest_path=manifest_path,
         repo_root=repo_root,
         max_errors=max(1, args.max_errors),
+        require_pass=args.require_pass,
     )
 
 

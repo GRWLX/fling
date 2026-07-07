@@ -203,6 +203,7 @@ jobs:
           printf "%s\n" "${slackware_bootstrap_mirror}/" >/etc/slackpkg/mirrors
           slackpkg -batch=on -default_answer=y update >/tmp/slackpkg-update.log 2>&1 || { cat /tmp/slackpkg-update.log; exit 1; }
           slackpkg -batch=on -default_answer=y install ca-certificates >/tmp/slackpkg-ca-certificates.log 2>&1 || { cat /tmp/slackpkg-ca-certificates.log; exit 1; }
+          slackpkg -batch=on -default_answer=y install openssh >/tmp/slackpkg-openssh.log 2>&1 || { cat /tmp/slackpkg-openssh.log; exit 1; }
           if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates >/tmp/update-ca-certificates.log 2>&1 || true; fi
           ssl_ca=/etc/ssl/certs/ca-certificates.crt
           test -s "$ssl_ca"
@@ -422,9 +423,17 @@ jobs:
       - name: Install and validate published pkg
         run: |
           set -euo pipefail
-          curl -fsSL "https://grwlx.github.io/sshfling/downloads/sshfling-${{ needs.validate-version.outputs.version }}.pkg" -o /tmp/sshfling.pkg
-          sudo installer -pkg /tmp/sshfling.pkg -target /
-          tests/cross-os/validate-cli.sh /usr/local/bin/sshfling "${{ needs.validate-version.outputs.version }}"
+          version="${{ needs.validate-version.outputs.version }}"
+          pkg="/tmp/sshfling-${version}.pkg"
+          curl -fsSL "https://grwlx.github.io/sshfling/downloads/sshfling-${version}.pkg" -o "$pkg"
+          curl -fsSL "https://grwlx.github.io/sshfling/downloads/SHA256SUMS" -o /tmp/SHA256SUMS
+          grep "  sshfling-${version}.pkg$" /tmp/SHA256SUMS > /tmp/sshfling.SHA256SUMS
+          (cd /tmp && shasum -a 256 -c sshfling.SHA256SUMS)
+          pkgutil --check-signature "$pkg"
+          xcrun stapler validate "$pkg"
+          spctl -a -vv -t install "$pkg"
+          sudo installer -pkg "$pkg" -target /
+          tests/cross-os/validate-cli.sh /usr/local/bin/sshfling "$version"
 
   macos-homebrew:
     name: Homebrew formula runtime
@@ -459,8 +468,26 @@ jobs:
           $ErrorActionPreference = "Stop"
           $version = "${{ needs.validate-version.outputs.version }}"
           $msi = Join-Path $env:TEMP "sshfling-$version.msi"
+          $sums = Join-Path $env:TEMP "SHA256SUMS"
           Invoke-WebRequest -Uri "https://grwlx.github.io/sshfling/downloads/sshfling-$version.msi?run=${{ github.run_id }}" -OutFile $msi
-          Start-Process msiexec.exe -Wait -ArgumentList "/i", $msi, "/qn", "/norestart"
+          Invoke-WebRequest -Uri "https://grwlx.github.io/sshfling/downloads/SHA256SUMS?run=${{ github.run_id }}" -OutFile $sums
+          $expectedLine = Get-Content $sums | Where-Object { $_ -match "  sshfling-$version\.msi$" } | Select-Object -First 1
+          if (-not $expectedLine) {
+            throw "SHA256SUMS does not contain sshfling-$version.msi"
+          }
+          $expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
+          $actualHash = (Get-FileHash -Algorithm SHA256 -Path $msi).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "SHA-256 mismatch for sshfling-$version.msi"
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $msi
+          if ($signature.Status -ne "Valid") {
+            throw "MSI Authenticode signature is not valid: $($signature.Status)"
+          }
+          $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/i", $msi, "/qn", "/norestart")
+          if ($proc.ExitCode -notin @(0, 3010, 1641)) {
+            throw "msiexec install failed with exit code $($proc.ExitCode)"
+          }
           $candidates = @(
             (Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"),
             (Join-Path ${env:ProgramFiles(x86)} "SSHFling\sshfling.cmd")
@@ -471,7 +498,10 @@ jobs:
             throw "Installed sshfling.cmd was not found"
           }
           tests\cross-os\validate-cli.ps1 -CommandPath $cmd -Version $version
-          Start-Process msiexec.exe -Wait -ArgumentList "/x", $msi, "/qn", "/norestart"
+          $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/x", $msi, "/qn", "/norestart")
+          if ($proc.ExitCode -notin @(0, 3010, 1605, 1614, 1641)) {
+            throw "msiexec uninstall failed with exit code $($proc.ExitCode)"
+          }
           $remainingCommands = $candidates | Where-Object { Test-Path $_ }
           if ($remainingCommands) {
             throw "MSI uninstall left installed command(s): $($remainingCommands -join ', ')"

@@ -29,7 +29,8 @@ This runbook covers package release operations for SSHFling.
 4. Confirm release notes and docs match the implemented access contract:
    password access is the default, certificate access requires
    `--certificate`, access levels are classifications rather than privilege
-   grants, `password prune` only removes expired tracked password grants, and
+   grants, `password prune` requires `--all` or `--username USER` and only
+   removes expired tracked password grants, and
    package uninstall does not remove `/etc/sshfling` configuration or promise
    dependency-state rollback.
 5. Confirm repository signing secrets are configured for production publishing.
@@ -226,14 +227,15 @@ sudo sshfling shutdown
 Prune expired temporary password grants:
 
 ```bash
-sudo sshfling password prune
+sudo sshfling password prune --all
 sudo sshfling password prune --all --delete-users
 sudo sshfling password prune --username s234 --delete-users
 ```
 
-Prune skips active grants. Use `--delete-users` only for expired Unix users
-created by SSHFling; existing users explicitly allowed with
-`--allow-existing-user` are locked and expired but are not deleted.
-Root-equivalent users are never deleted from password-grant metadata or
-host-user markers. Password mode refuses root-equivalent Unix users; use explicit
-certificate mode for approved admin/root-equivalent break-glass access.
+Prune requires exactly one selector: `--all` or `--username USER`, and skips
+active grants. Use `--delete-users` only for expired Unix users created by
+SSHFling; existing users explicitly allowed with `--allow-existing-user` are
+locked and expired but are not deleted. Root-equivalent users are never deleted
+from password-grant metadata or host-user markers. Password mode refuses
+root-equivalent Unix users; use explicit certificate mode for approved
+admin/root-equivalent break-glass access.

@@ -6,8 +6,10 @@ RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR ?= docs/release/enterprise-release-evidence
 RELEASE_MATRIX ?= $(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv
 RELEASE_MANIFEST ?= $(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json
 RELEASE_SECURITY_SCAN_FLAGS ?=
+RELEASE_SECURITY_LOCAL_OUTPUT_DIR ?= build/release-security-local
+RELEASE_MATRIX_VALIDATE_FLAGS ?=
 
-.PHONY: install-local uninstall-local test test-containers test-release-security-scan release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg clean
+.PHONY: install-local uninstall-local test test-containers test-release-security-scan release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-local release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg clean
 
 install-local:
 	install -d "$(PREFIX)/bin" "$(TEMPLATE_DIR)/scripts" "$(TEMPLATE_DIR)/secrets" "$(TEMPLATE_DIR)/ssh-client" "$(TEMPLATE_DIR)/ssh-server" "$(TEMPLATE_DIR)/production" "$(TEMPLATE_DIR)/systemd"
@@ -51,6 +53,9 @@ release-assets-evidence:
 release-security-scan:
 	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" $(RELEASE_SECURITY_SCAN_FLAGS)
 
+release-security-scan-local:
+	$(MAKE) release-security-scan RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR="$(RELEASE_SECURITY_LOCAL_OUTPUT_DIR)" RELEASE_SECURITY_SCAN_FLAGS="$(RELEASE_SECURITY_SCAN_FLAGS) --allow-dirty"
+
 release-security-scan-optional:
 	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
 
@@ -58,13 +63,13 @@ release-security-scan-strict:
 	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools --strict-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
 
 release-security-evidence-validate:
-	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" --manifest "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json"
+	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" --manifest "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json" $(RELEASE_MATRIX_VALIDATE_FLAGS)
 
 release-matrix-validate:
 	@if [ "$(RELEASE_MATRIX)" = "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" ] && [ "$(RELEASE_MANIFEST)" = "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json" ]; then \
 		$(MAKE) release-security-scan; \
 	fi
-	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_MATRIX)" --manifest "$(RELEASE_MANIFEST)"
+	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_MATRIX)" --manifest "$(RELEASE_MANIFEST)" $(RELEASE_MATRIX_VALIDATE_FLAGS)
 
 check-package-version:
 	@bash -c 'source packaging/version.sh; assert_sshfling_version_matches_source "$$1" "$$2" >/dev/null' _ "$(VERSION)" "$(CURDIR)"

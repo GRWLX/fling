@@ -5,6 +5,7 @@ RUN apt-get update \
     bash \
     ca-certificates \
     coreutils \
+    openssl \
     openssh-server \
     procps \
     tini \

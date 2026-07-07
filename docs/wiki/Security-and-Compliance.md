@@ -102,21 +102,26 @@ SSHFling is proprietary commercial software. Enterprise publishing must confirm:
 For production hosts:
 
 - Treat password grants as the default access path and manage them with short
-  lifetimes, named temporary users, prune automation, and host audit controls.
+  explicit lifetimes, named temporary users, prune automation, and host audit
+  controls.
 - Use certificate mode explicitly when policy forbids temporary local passwords
   or when the target platform is not a validated Linux password host.
 - Treat certificate-specific setup options as certificate-only. The CLI rejects
   options such as `--ca-key`, `--public-key-file`, `--out`, `--login-user`, and
   `--source-address` unless `--certificate` is present.
+  Certificate setup also requires an existing CA keypair from `sshfling ca init`
+  and host trust from `sshfling host install`.
 - Treat `access_level` as a policy classification for least-privilege review,
   not as privilege assignment. Host IAM, sudoers, PAM, AD, MDM, groups, local
   administrator membership, and service-manager policy remain the enforcement
   layer for actual account privileges.
-- Treat `sshfling password prune` as expired-grant cleanup, not as a broad user
-  deletion command. It skips active grants, skips unmanaged records, locks
-  expired SSHFling-created users by default, deletes those users only with
+- Treat `sshfling password prune --all` and
+  `sshfling password prune --username USER` as expired-grant cleanup, not as
+  broad user deletion commands. Prune requires exactly one of those selectors.
+  It skips active grants, skips unmanaged records, locks expired
+  SSHFling-created users by default, deletes those users only with
   `--delete-users`, locks/expires existing users explicitly allowed with
-  `--allow-existing-user` without deleting them, and never deletes
+  `--allow-existing-user` without deleting them, and never mutates
   root-equivalent users from password-grant metadata or host-user markers.
 - Treat package uninstall as package cleanup only. It removes SSHFling-managed
   package files and repository entries, but preserves host SSH state, password

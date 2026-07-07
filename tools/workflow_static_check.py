@@ -492,6 +492,12 @@ def check_release_packages_gate(workflow: Workflow) -> list[str]:
     for dependency in ("linux", "macos", "windows"):
         if not re.search(rf"^\s+-\s+{re.escape(dependency)}\s*$", release.text, re.MULTILINE):
             errors.append(f"{job_ref(workflow, release)}: release job must need {dependency}")
+    for signing_job_id in ("macos", "windows"):
+        signing_job = workflow.jobs.get(signing_job_id)
+        if signing_job and "name: release-signing" not in signing_job.text:
+            errors.append(f"{job_ref(workflow, signing_job)}: signing job must use the release-signing environment")
+    if "name: release-packages" not in release.text:
+        errors.append(f"{job_ref(workflow, release)}: release job must use the release-packages environment")
 
     release_checks = {
         "tag/version match gate": '"${GITHUB_REF_NAME}" != "v${version}"',
@@ -499,8 +505,13 @@ def check_release_packages_gate(workflow: Workflow) -> list[str]:
         "flattened artifact gate": "Release artifacts must be flattened",
         "non-empty artifact gate": "Release artifact is missing or empty",
         "checksum verification": "sha256sum -c SHA256SUMS",
+        "release security scan": "make release-security-scan",
+        "optional release security tools": 'RELEASE_SECURITY_RUN_OPTIONAL_TOOLS: "1"',
+        "strict release security scan": 'RELEASE_SECURITY_STRICT_OPTIONAL_TOOLS: "1"',
+        "release security evidence validation": "make release-security-evidence-validate",
         "release evidence generation": "--mode release-assets",
         "release evidence validation": "release-matrix-validate",
+        "strict release matrix validation": "RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass",
         "provenance attestation": "actions/attest@",
         "GitHub release upload": "softprops/action-gh-release@",
     }
@@ -533,12 +544,21 @@ def check_public_package_gate(workflow: Workflow) -> list[str]:
         errors.append(f"{workflow_ref(workflow)}: public package workflow is missing deploy-pages job")
     if set(package_web.needs) != {"linux", "macos", "windows"}:
         errors.append(f"{job_ref(workflow, package_web)}: package-web job must need exactly linux, macos, and windows")
+    for signing_job_id in ("macos", "windows", "package-web"):
+        signing_job = workflow.jobs.get(signing_job_id)
+        if signing_job and "name: release-signing" not in signing_job.text:
+            errors.append(f"{job_ref(workflow, signing_job)}: signing/package web job must use the release-signing environment")
 
     package_checks = {
         "publish output": "publish: ${{ steps.package_site_mode.outputs.publish }}",
         "public package verification": "packaging/verify-public-web.sh",
+        "release security scan": "make release-security-scan",
+        "optional package-site security tools": 'RELEASE_SECURITY_RUN_OPTIONAL_TOOLS: "1"',
+        "publish-gated strict package-site security scan": "RELEASE_SECURITY_STRICT_OPTIONAL_TOOLS: ${{ steps.package_site_mode.outputs.publish == 'true' && '1' || '' }}",
+        "release security evidence validation": "make release-security-evidence-validate",
         "package-site evidence generation": "--mode package-site",
         "package-site evidence validation": "release-matrix-validate",
+        "strict package-site matrix validation": "RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass",
         "publish-gated attestation": "steps.package_site_mode.outputs.publish == 'true'",
         "package web artifact upload": "public-package-web",
     }
@@ -581,8 +601,12 @@ def check_public_package_gate(workflow: Workflow) -> list[str]:
             "Pages upload": "actions/upload-pages-artifact@",
             "Pages deploy": "actions/deploy-pages@",
             "post-deploy install script check": "fetch install.sh",
-            "APT signature check": "BEGIN PGP SIGNED MESSAGE",
-            "RPM signature check": "repomd.xml.asc",
+            "deployed repo key fetch": "fetch sshfling-repo.asc",
+            "deployed fingerprint fetch": "fetch sshfling-repo-fingerprint.txt",
+            "deployed fingerprint check": 'test "$actual_fingerprint" = "$expected_fingerprint"',
+            "deployed repo key import": 'gpg --batch --import "$tmp/sshfling-repo.asc"',
+            "APT signature check": 'gpg --batch --verify "$tmp/InRelease"',
+            "RPM signature check": 'gpg --batch --verify "$tmp/repomd.xml.asc" "$tmp/repomd.xml"',
             "signed apt source check": "signed-by=/usr/share/keyrings/sshfling-repo.gpg",
             "RPM repo_gpgcheck check": "repo_gpgcheck=1",
             "download checksum check": "downloads/SHA256SUMS",
@@ -608,6 +632,14 @@ def check_github_packages_gate(workflow: Workflow) -> list[str]:
             "GitHub Packages latest tag must only be enabled for tag refs",
         )
     )
+    errors.extend(
+        require_text(
+            workflow,
+            workflow.text,
+            "type=raw,value=${{ needs.resolve.outputs.version }},enable=${{ github.ref_type == 'tag' }}",
+            "GitHub Packages version tag must only be enabled for tag refs",
+        )
+    )
     validate = workflow.jobs.get("validate")
     publish = workflow.jobs.get("publish")
     if not validate:
@@ -621,6 +653,9 @@ def check_github_packages_gate(workflow: Workflow) -> list[str]:
             "source tests": "make test",
             "release security evidence": "make release-security-scan",
             "release evidence validation": "make release-security-evidence-validate",
+            "optional release security tools": 'RELEASE_SECURITY_RUN_OPTIONAL_TOOLS: "1"',
+            "strict tag release security evidence": "RELEASE_SECURITY_STRICT_OPTIONAL_TOOLS: ${{ github.ref_type == 'tag' && '1' || '' }}",
+            "strict tag release evidence validation": "RELEASE_MATRIX_VALIDATE_FLAGS: ${{ github.ref_type == 'tag' && '--require-pass' || '' }}",
             "container lifecycle matrix": "make test-containers",
         }
         for label, needle in validate_checks.items():
@@ -629,6 +664,8 @@ def check_github_packages_gate(workflow: Workflow) -> list[str]:
     required_needs = {"resolve", "validate"}
     if set(publish.needs) != required_needs:
         errors.append(f"{job_ref(workflow, publish)}: publish job must need exactly resolve and validate")
+    if "github.ref_type == 'tag'" not in publish.if_condition:
+        errors.append(f"{job_ref(workflow, publish)}: publish job must run only for tag refs")
     if "name: github-packages" not in publish.text:
         errors.append(f"{job_ref(workflow, publish)}: publish job must use the github-packages environment")
     if not has_permission(workflow, publish, "id-token", "write"):
@@ -658,6 +695,41 @@ def check_github_packages_gate(workflow: Workflow) -> list[str]:
         errors.append(f"{job_ref(workflow, publish)}: publish job must sign the pushed image digest")
     if "cosign sign --yes" not in publish.text:
         errors.append(f"{job_ref(workflow, publish)}: publish job must sign pushed image digests")
+    return errors
+
+
+def check_published_package_validation_gate(workflow: Workflow) -> list[str]:
+    errors: list[str] = []
+    macos = workflow.jobs.get("macos-pkg")
+    windows = workflow.jobs.get("windows-msi")
+
+    if not macos:
+        errors.append(f"{workflow_ref(workflow)}: published package validation workflow is missing macos-pkg job")
+    else:
+        macos_checks = {
+            "published pkg checksum manifest download": "downloads/SHA256SUMS",
+            "published pkg checksum verification": "shasum -a 256 -c sshfling.SHA256SUMS",
+            "published pkg signature verification": "pkgutil --check-signature",
+            "published pkg notarization check": "xcrun stapler validate",
+            "published pkg Gatekeeper check": "spctl -a -vv -t install",
+        }
+        for label, needle in macos_checks.items():
+            errors.extend(require_text(workflow, macos.text, needle, f"macos-pkg job is missing {label}"))
+
+    if not windows:
+        errors.append(f"{workflow_ref(workflow)}: published package validation workflow is missing windows-msi job")
+    else:
+        windows_checks = {
+            "published MSI checksum manifest download": "downloads/SHA256SUMS",
+            "published MSI checksum entry gate": "SHA256SUMS does not contain sshfling-$version.msi",
+            "published MSI checksum verification": "Get-FileHash -Algorithm SHA256",
+            "published MSI checksum mismatch gate": "SHA-256 mismatch for sshfling-$version.msi",
+            "published MSI Authenticode verification": "Get-AuthenticodeSignature",
+            "published MSI valid signature gate": '$signature.Status -ne "Valid"',
+        }
+        for label, needle in windows_checks.items():
+            errors.extend(require_text(workflow, windows.text, needle, f"windows-msi job is missing {label}"))
+
     return errors
 
 
@@ -695,6 +767,8 @@ def check_release_gates(workflow: Workflow) -> list[str]:
         return check_public_package_gate(workflow)
     if name == "github-packages.yml":
         return check_github_packages_gate(workflow)
+    if name in {"cross-os-validation.yml", "package-install-tests.yml"}:
+        return check_published_package_validation_gate(workflow)
     return []
 
 

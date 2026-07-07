@@ -72,6 +72,8 @@ jobs:
     name: macOS package
     runs-on: macos-latest
     timeout-minutes: 20
+    environment:
+      name: release-signing
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -85,6 +87,24 @@ jobs:
           set -euo pipefail
           version="$(bash packaging/resolve-version.sh "$INPUT_VERSION")"
           echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Require macOS signing and notarization for release tags
+        if: github.ref_type == 'tag'
+        env:
+          REQUIRE_SIGNING: ${{ vars.SSHFLING_PKG_REQUIRE_SIGNING }}
+          REQUIRE_NOTARIZATION: ${{ vars.SSHFLING_PKG_REQUIRE_NOTARIZATION }}
+          HAS_SIGN_IDENTITY: ${{ secrets.SSHFLING_PKG_SIGN_IDENTITY != '' }}
+          HAS_NOTARY_PROFILE: ${{ secrets.SSHFLING_PKG_NOTARY_PROFILE != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "$REQUIRE_SIGNING" != "true" || "$HAS_SIGN_IDENTITY" != "true" ]]; then
+            echo "Release tag macOS packages require SSHFLING_PKG_REQUIRE_SIGNING=true and SSHFLING_PKG_SIGN_IDENTITY." >&2
+            exit 2
+          fi
+          if [[ "$REQUIRE_NOTARIZATION" != "true" || "$HAS_NOTARY_PROFILE" != "true" ]]; then
+            echo "Release tag macOS packages require SSHFLING_PKG_REQUIRE_NOTARIZATION=true and SSHFLING_PKG_NOTARY_PROFILE." >&2
+            exit 2
+          fi
 
       - name: Build macOS package
         env:
@@ -108,6 +128,8 @@ jobs:
     name: Windows package
     runs-on: windows-latest
     timeout-minutes: 30
+    environment:
+      name: release-signing
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -129,11 +151,59 @@ jobs:
           choco install wixtoolset -y --no-progress
           "C:\Program Files (x86)\WiX Toolset v3.14\bin" >> $env:GITHUB_PATH
 
+      - name: Require Windows Authenticode for release tags
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          REQUIRE_AUTHENTICODE: ${{ vars.SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE }}
+          HAS_SIGN_CERT_SHA1: ${{ secrets.SSHFLING_WINDOWS_SIGN_CERT_SHA1 != '' }}
+        run: |
+          if ($env:REQUIRE_AUTHENTICODE -ne "true" -or $env:HAS_SIGN_CERT_SHA1 -ne "true") {
+            throw "Release tag Windows packages require SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE=true and SSHFLING_WINDOWS_SIGN_CERT_SHA1."
+          }
+
       - name: Build Windows MSI
         shell: pwsh
         env:
           SSHFLING_VERSION: ${{ steps.version.outputs.version }}
+          SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE: ${{ vars.SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE }}
+          SSHFLING_WINDOWS_SIGN_CERT_SHA1: ${{ secrets.SSHFLING_WINDOWS_SIGN_CERT_SHA1 }}
+          SSHFLING_WINDOWS_SIGN_TIMESTAMP_URL: ${{ vars.SSHFLING_WINDOWS_SIGN_TIMESTAMP_URL }}
         run: powershell -NoProfile -File packaging/build-msi.ps1
+
+      - name: Validate freshly built Windows artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.version }}"
+          $msi = "dist\sshfling-$version.msi"
+          $zip = "dist\sshfling-$version-windows.zip"
+          foreach ($path in @($msi, $zip)) {
+            if (-not (Test-Path $path) -or (Get-Item $path).Length -le 0) {
+              throw "Missing or empty Windows artifact: $path"
+            }
+          }
+          $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/i", (Resolve-Path $msi).Path, "/qn", "/norestart")
+          if ($proc.ExitCode -notin @(0, 3010, 1641)) {
+            throw "msiexec install failed with exit code $($proc.ExitCode)"
+          }
+          $candidates = @(
+            (Join-Path $env:ProgramFiles "SSHFling\sshfling.cmd"),
+            (Join-Path ${env:ProgramFiles(x86)} "SSHFling\sshfling.cmd")
+          )
+          $cmd = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $cmd) {
+            throw "Installed sshfling.cmd was not found"
+          }
+          tests\cross-os\validate-cli.ps1 -CommandPath $cmd -Version $version
+          $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/x", (Resolve-Path $msi).Path, "/qn", "/norestart")
+          if ($proc.ExitCode -notin @(0, 3010, 1605, 1614, 1641)) {
+            throw "msiexec uninstall failed with exit code $($proc.ExitCode)"
+          }
+          $dest = Join-Path $env:TEMP "sshfling-zip-validation"
+          Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
+          Expand-Archive -Force $zip -DestinationPath $dest
+          tests\cross-os\validate-cli.ps1 -CommandPath (Join-Path $dest "sshfling.cmd") -Version $version
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v7
@@ -149,6 +219,8 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: release-packages
     permissions:
       contents: write
       id-token: write
@@ -259,6 +331,17 @@ jobs:
             done
           } | xargs -0 sha256sum -- >"$RUNNER_TEMP/release-subjects.sha256"
 
+      - name: Generate and validate release security evidence
+        env:
+          VERSION: ${{ needs.linux.outputs.version }}
+          RELEASE_SECURITY_RUN_OPTIONAL_TOOLS: "1"
+          RELEASE_SECURITY_STRICT_OPTIONAL_TOOLS: "1"
+          RELEASE_MATRIX_VALIDATE_FLAGS: --require-pass
+        run: |
+          set -euo pipefail
+          make release-security-scan VERSION="${VERSION}"
+          make release-security-evidence-validate RELEASE_MATRIX_VALIDATE_FLAGS="${RELEASE_MATRIX_VALIDATE_FLAGS}"
+
       - name: Generate and validate release evidence gate
         run: |
           set -euo pipefail
@@ -269,13 +352,15 @@ jobs:
             --source-commit "$GITHUB_SHA"
           make release-matrix-validate \
             RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
-            RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
+            RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json \
+            RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass
 
       - name: Upload release evidence
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence
           path: |
+            docs/release/enterprise-release-evidence/security-scans
             docs/release/enterprise-release-evidence/generated/release-assets-evidence.json
             docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
             docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv

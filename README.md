@@ -9,8 +9,14 @@ published package-site evidence, repository signing metadata, and a signing-key
 fingerprint:
 
 ```bash
+APPROVED_REPO_FINGERPRINT="REPLACE_WITH_RELEASE_FINGERPRINT"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL https://grwlx.github.io/sshfling/sshfling-repo.gpg -o "$tmp/sshfling-repo.gpg"
+actual_fingerprint="$(gpg --batch --show-keys --with-colons "$tmp/sshfling-repo.gpg" | awk -F: '/^fpr:/ {print toupper($10); exit}')"
+test "$actual_fingerprint" = "$APPROVED_REPO_FINGERPRINT"
 sudo install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://grwlx.github.io/sshfling/sshfling-repo.gpg | sudo tee /usr/share/keyrings/sshfling-repo.gpg >/dev/null
+sudo install -m 0644 "$tmp/sshfling-repo.gpg" /usr/share/keyrings/sshfling-repo.gpg
 echo "deb [signed-by=/usr/share/keyrings/sshfling-repo.gpg] https://grwlx.github.io/sshfling/apt ./" | sudo tee /etc/apt/sources.list.d/sshfling.list
 sudo apt update
 sudo apt install -y sshfling
@@ -20,7 +26,10 @@ Uninstall the package/CLI:
 
 ```bash
 sudo apt remove -y sshfling
-sudo rm -f /etc/apt/sources.list.d/sshfling.list
+sudo rm -f \
+  /etc/apt/sources.list.d/sshfling.list \
+  /etc/apt/preferences.d/sshfling \
+  /usr/share/keyrings/sshfling-repo.gpg
 sudo apt update
 ```
 
@@ -35,7 +44,7 @@ configuration and local state removal.
 Password access:
 
 ```bash
-sudo sshfling
+sudo sshfling -t 10m
 ```
 
 Shorter password access:
@@ -44,7 +53,7 @@ Shorter password access:
 sudo sshfling -t 10m
 ```
 
-Certificate access:
+Certificate access after the user CA exists and the target host trusts it:
 
 ```bash
 sudo sshfling --certificate -t 10m
@@ -93,11 +102,11 @@ The server-side grant prints the detected server address in the client command. 
 Rules:
 
 - Server-side grant, shutdown, and kill commands require root/admin.
+- Temporary access setup requires an explicit `-t/--time` lifetime.
 - The maximum grant time is 24 hours.
-- `sshfling` with no `-t` uses the maximum: 24 hours.
 - Up to 10 active sshfling SSH sessions are allowed, depending on install policy.
 - Password mode is the default. It creates a real Unix account password, tracks the grant, auto-expires access, and allows only one active session for that temporary username.
-- Certificate mode is opt-in with `--certificate`. If no SSH public key is provided, certificate mode creates a temporary keypair automatically.
+- Certificate mode is opt-in with `--certificate`. Run `sshfling ca init` and configure target host trust with `sshfling host install` before issuing certificate grants. If no SSH public key is provided, certificate mode creates a temporary client keypair automatically.
 - SSHFling discloses use in system logs through `logger` with the `sshfling` and `sshfling-session` tags. Audit records include grant/session metadata such as user, principal, lifetime, serial, and outcome, but not passwords, bearer tokens, cookies, private keys, public key material, or raw remote commands.
 
 Under the hood, password mode writes a temporary sshd `Match User` block that forces the timeout wrapper. Certificate mode uses OpenSSH user certificates and the same host-side timeout wrapper.
@@ -113,15 +122,15 @@ Every SSH session is capped by `SSH_SESSION_SECONDS`.
 
 For production hosts, Docker is only a test harness. The normal production grant is a temporary password grant:
 
-- `sudo sshfling` creates a tracked temporary Unix password grant.
+- `sudo sshfling -t 10m` creates a tracked temporary Unix password grant.
 - `sudo sshfling -t 10m --username ticket-1234` creates a shorter named password grant.
-- `sudo sshfling password prune` removes expired tracked password grants.
+- `sudo sshfling password prune --all` removes expired tracked password grants.
 
 OpenSSH user certificates are available explicitly:
 
 - `sshfling ca init` creates an SSH user CA keypair.
 - `sshfling host install` configures a target host to trust the CA for one Unix user.
-- `sudo sshfling --certificate` creates a temporary certificate grant.
+- `sudo sshfling --certificate -t 10m` creates a temporary certificate grant after the CA keypair exists.
 - `sshfling cert issue --certificate` signs a user's public key for a short lifetime.
 - `sshfling serve` runs a small authenticated certificate issuer service.
 
@@ -137,10 +146,10 @@ The issued certificate includes an OpenSSH `force-command` option that runs `ssh
 The normal command is:
 
 ```bash
-sudo sshfling
+sudo sshfling -t 10m
 ```
 
-That creates a temporary Unix password grant, prints a generated password, and prints the `sshfling user@host` client command. Use `-t` to choose a shorter time.
+That creates a temporary Unix password grant, prints a generated password, and prints the `sshfling user@host` client command. Choose the shortest approved lifetime.
 
 Optional username:
 
@@ -351,14 +360,9 @@ revert is required.
 The detailed cross-platform dependency policy is in
 [OpenSSH dependency policy](docs/openssh-dependencies.md).
 
-Convenience wrapper for Linux and Homebrew package uninstall:
-
-```bash
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL https://grwlx.github.io/sshfling/install.sh -o "$tmp/install.sh"
-bash "$tmp/install.sh" uninstall
-```
+For managed hosts, use the direct package-manager uninstall commands in
+[Install and uninstall runbook](docs/install-uninstall.md). Avoid downloading a
+mutable helper script at uninstall time.
 
 Convenience wrapper with a specific uninstall path:
 
@@ -421,12 +425,18 @@ sudo sshfling host uninstall --username temp-remote --delete-user --reload
 Clean up temporary password grants:
 
 ```bash
-sudo sshfling password prune
+sudo sshfling password prune --all
 sudo sshfling password prune --all --delete-users
 sudo sshfling password prune --username s234 --delete-users
 ```
 
-Prune only removes expired grants. `--all` scans the tracked grant store but leaves active grants in place. By default, expired SSHFling-created Unix users are locked and expired; `--delete-users` deletes expired SSHFling-created users. Existing users that were explicitly allowed with `--allow-existing-user` are locked and expired but are never deleted by `--delete-users`. Root-equivalent users are never deleted from password-grant metadata or host-user markers.
+Prune requires exactly one selector: `--all` to scan the tracked grant store or
+`--username USER` for targeted cleanup. It only removes expired grants and leaves
+active grants in place. By default, expired SSHFling-created Unix users are
+locked and expired; `--delete-users` deletes expired SSHFling-created users.
+Existing users that were explicitly allowed with `--allow-existing-user` are
+locked and expired but are never deleted by `--delete-users`. Root-equivalent
+users are never deleted from password-grant metadata or host-user markers.
 
 If you installed from a source checkout with `./scripts/install-local.sh`, remove that local install with:
 
@@ -492,7 +502,10 @@ GitHub Actions workflows are included for public distribution:
 - `Release packages without web` builds release artifacts only.
 - `Release packages with public web` verifies a GitHub Pages package site for commands such as `sudo apt install -y sshfling`, `sudo dnf install -y sshfling`, Homebrew, macOS `.pkg`, Windows MSI installs, and community package manifests for BSDs, Arch/AUR, Alpine, Nix, Guix, Void, Gentoo, Slackware, openSUSE OBS, Snapcraft, Termux, AppImage, Scoop, winget, and Chocolatey. Manual runs are dry-run verification unless `publish=true`; tag runs publish only when stable repository signing secrets are present and the configured Pages environment permits deployment.
 - `Package install tests` installs from the published package site and verifies the requested `sshfling` version across Linux package repos and community package manifests.
-- `Cross OS validation` installs or builds those outputs across Linux, BSD, macOS, and Windows and checks the 24-hour policy default, copied service templates, active-session PID fields, and detached job PID lifecycle.
+- `Cross OS validation` installs or builds those outputs across Linux, BSD,
+  macOS, and Windows and checks the explicit grant lifetime requirement,
+  24-hour cap, copied service templates, active-session PID fields, and
+  detached job PID lifecycle.
 
 ### v0.1.13 Release Readiness
 
@@ -521,13 +534,14 @@ git status --short --branch
 make clean
 make test
 make test-containers
-make release-security-scan VERSION=0.1.13
-make release-security-evidence-validate
+make release-security-scan-strict VERSION=0.1.13
+make release-security-evidence-validate RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass
 make package VERSION=0.1.13
 make release-assets-evidence VERSION=0.1.13
 make release-matrix-validate \
   RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
-  RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json
+  RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json \
+  RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass
 ```
 
 Link the completed release workflows listed above with the same version input.

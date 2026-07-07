@@ -294,7 +294,6 @@ test_rpm_image() {
     sh /tmp/validate-cli.sh sshfling '$version'
 
     rm -f /etc/sshfling/policy.json /etc/sshfling/policy.json.rpmnew /etc/sshfling/policy.json.rpmsave /etc/sshfling/sshflingd.env /etc/sshfling/sshflingd.env.rpmnew /etc/sshfling/sshflingd.env.rpmsave
-    rmdir /etc/sshfling
     rpm -e sshfling >/dev/null
     test ! -e /var/lib/sshfling/package-state/install-state
     test ! -e /var/lib/sshfling/rpm-preserve-config
@@ -306,7 +305,6 @@ test_rpm_image() {
     \$package_install >/dev/null
     assert_sshflingd_account_present
     rm -f /etc/sshfling/policy.json /etc/sshfling/policy.json.rpmnew /etc/sshfling/policy.json.rpmsave /etc/sshfling/sshflingd.env /etc/sshfling/sshflingd.env.rpmnew /etc/sshfling/sshflingd.env.rpmsave
-    rmdir /etc/sshfling
     rpm -e sshfling >/dev/null
     test ! -e /var/lib/sshfling/package-state/install-state
     test ! -e /var/lib/sshfling/rpm-preserve-config
@@ -393,6 +391,7 @@ test_slackware() {
     printf '%s\n' \"\${slackware_bootstrap_mirror}/\" >/etc/slackpkg/mirrors
     slackpkg -batch=on -default_answer=y update >/tmp/slackpkg-update.log 2>&1 || { cat /tmp/slackpkg-update.log; exit 1; }
     slackpkg -batch=on -default_answer=y install ca-certificates >/tmp/slackpkg-ca-certificates.log 2>&1 || { cat /tmp/slackpkg-ca-certificates.log; exit 1; }
+    slackpkg -batch=on -default_answer=y install openssh >/tmp/slackpkg-openssh.log 2>&1 || { cat /tmp/slackpkg-openssh.log; exit 1; }
     if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates >/tmp/update-ca-certificates.log 2>&1 || true; fi
     ssl_ca=/etc/ssl/certs/ca-certificates.crt
     test -s \"\$ssl_ca\"
@@ -439,7 +438,7 @@ test_nix() {
     tar -xzf /tmp/sshfling-${version}.tar.gz
     cd sshfling-${version}
     NIXPKGS_ALLOW_UNFREE=1 nix --extra-experimental-features 'nix-command flakes' build --impure .#default -o result
-    nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#python3 -c sh /tmp/validate-cli.sh ./result/bin/sshfling '$version'"
+    nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#coreutils nixpkgs#gnugrep nixpkgs#gnused nixpkgs#openssh nixpkgs#python3 -c sh /tmp/validate-cli.sh ./result/bin/sshfling '$version'"
 }
 
 prepare_artifacts

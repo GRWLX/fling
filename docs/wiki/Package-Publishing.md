@@ -30,8 +30,12 @@ original-state ownership rules are maintained in
 Every package release must preserve these documented runtime behaviors unless
 the release notes call out an intentional breaking change:
 
-- `sudo sshfling` creates temporary password access by default.
+- Password mode is the default access type, but grant creation requires an
+  explicit `-t/--time` lifetime such as `sudo sshfling -t 10m`.
 - Certificate access is explicit with `--certificate`.
+- Certificate setup requires an existing CA keypair from `sshfling ca init` and
+  host trust from `sshfling host install`; certificate setup rejects dry-run and
+  missing CA keypairs before creating client key material.
 - Certificate-only setup options, including `--ca-key`, `--public-key-file`,
   `--out`, `--login-user`, `--key-id`, `--source-address`, and `--no-pty`, are
   invalid unless `--certificate` is present.
@@ -39,11 +43,12 @@ the release notes call out an intentional breaking change:
   classifications for least-privilege review. They do not grant sudo,
   administrator, group, IAM, or root-equivalent privileges; host controls own
   actual privilege assignment.
-- `sshfling password prune` removes expired tracked password grants only. It
-  leaves active grants in place, skips unmanaged records, locks expired
-  SSHFling-created users by default, deletes those users only with
+- `sshfling password prune` requires exactly one selector: `--all` for fleet
+  cleanup or `--username USER` for targeted cleanup. It removes expired tracked
+  password grants only, leaves active grants in place, skips unmanaged records,
+  locks expired SSHFling-created users by default, deletes those users only with
   `--delete-users`, locks/expires existing users explicitly allowed with
-  `--allow-existing-user` without deleting them, and never deletes
+  `--allow-existing-user` without deleting them, and never mutates
   root-equivalent users from password-grant metadata or host-user markers.
 - Package uninstall removes package files and managed repository entries. Host
   SSH configuration, password grant state, CA material, `/etc/sshfling`
@@ -61,7 +66,8 @@ the release notes call out an intentional breaking change:
 - GitHub Pages configured to deploy from GitHub Actions.
 - GitHub Actions permissions for Pages deployments: `contents: read`,
   `pages: write`, and `id-token: write`.
-- A stable production GPG signing key for APT and RPM repository metadata.
+- A stable production GPG signing key for APT metadata, RPM packages, and RPM
+  repository metadata.
 - Apple Developer signing and notarization access if the `.pkg` is distributed
   as a production macOS installer.
 - Authenticode signing access if the MSI is distributed as a production Windows
@@ -108,6 +114,22 @@ Run the local test suite before publishing:
 
 ```bash
 make test
+```
+
+Release security evidence requires a clean worktree:
+
+```bash
+make release-security-scan VERSION=0.1.13
+make release-security-evidence-validate
+```
+
+For a local, non-release security scan while packaging changes are still dirty,
+use the explicit dirty-tree target. It writes ignored evidence under
+`build/release-security-local/` and must not be attached as production release
+evidence:
+
+```bash
+make release-security-scan-local VERSION=0.1.13
 ```
 
 Build local Linux packages when you are validating packaging changes from a

@@ -138,11 +138,13 @@ user's authorized-principals file. Shared CA, wrapper, policy-user, and Unix
 account removal are opt-in flags. Unix-account deletion requires the
 SSHFling-created host-user marker written by `host install --create-user`.
 
-Use `sshfling password prune` to clean expired tracked password grants. It
-removes expired grants only; `--delete-users` deletes expired SSHFling-created
-Unix users, while existing users explicitly allowed with `--allow-existing-user`
-are locked and expired but not deleted. Root-equivalent users are never deleted
-from password-grant metadata or host-user markers, and password grant creation
+Use `sshfling password prune --all` to clean expired tracked password grants,
+or `sshfling password prune --username USER` for targeted cleanup. Prune
+requires exactly one selector. It removes expired grants only; `--delete-users`
+deletes expired SSHFling-created Unix users, while existing users explicitly
+allowed with `--allow-existing-user` are locked and expired but not deleted.
+Root-equivalent users are never mutated from password-grant metadata or
+host-user markers, and password grant creation
 refuses root-equivalent Unix users.
 
 Package uninstall does not run those host-state cleanup commands automatically.

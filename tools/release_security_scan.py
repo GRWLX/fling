@@ -274,6 +274,33 @@ def current_commit(repo_root: Path) -> str:
         return ""
 
 
+def git_worktree_status(repo_root: Path) -> str:
+    if not (repo_root / ".git").exists():
+        return ""
+    try:
+        return subprocess.check_output(
+            ["git", "status", "--porcelain=v1"],
+            cwd=repo_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def git_dirty_fingerprint(repo_root: Path, status: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(status.encode("utf-8", errors="surrogateescape"))
+    for command in (["git", "diff", "--binary"], ["git", "diff", "--cached", "--binary"]):
+        try:
+            output = subprocess.check_output(command, cwd=repo_root, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            output = b""
+        digest.update(b"\0")
+        digest.update(output)
+    return digest.hexdigest()
+
+
 def workflow_run_url() -> str:
     server_url = os.environ.get("GITHUB_SERVER_URL")
     repository = os.environ.get("GITHUB_REPOSITORY")
@@ -1442,6 +1469,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
         f"- Generated at UTC: {payload['generated_at_utc']}",
         f"- Release version: {payload['release_version']}",
         f"- Source commit: {payload['source_commit']}",
+        f"- Source tree dirty: {payload.get('source_tree_dirty', False)}",
+        f"- Dirty fingerprint SHA-256: {payload.get('dirty_fingerprint_sha256', 'NOT_APPLICABLE')}",
         f"- Overall status: {payload['overall_status'].upper()}",
         "",
         "## Baseline Checks",
@@ -1572,11 +1601,17 @@ def generate(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
     output_dir = (repo_root / args.output_dir).resolve()
     repo_relative(output_dir, repo_root)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     source_commit = args.source_commit or os.environ.get("GITHUB_SHA") or current_commit(repo_root)
     if not source_commit:
         raise SystemExit("source commit is required; pass --source-commit outside a git checkout")
+    worktree_status = git_worktree_status(repo_root)
+    source_tree_dirty = bool(worktree_status.strip())
+    if source_tree_dirty and not args.allow_dirty:
+        raise SystemExit("release security evidence requires a clean git working tree; commit changes or pass --allow-dirty for non-release evidence")
+    dirty_fingerprint = git_dirty_fingerprint(repo_root, worktree_status) if source_tree_dirty else ""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     run_optional_tools = args.run_optional_tools or is_truthy(os.environ.get("RELEASE_SECURITY_RUN_OPTIONAL_TOOLS"))
     strict_optional_tools = args.strict_optional_tools or is_truthy(
@@ -1651,6 +1686,8 @@ def generate(args: argparse.Namespace) -> int:
         "schema_version": 1,
         "release_version": args.version,
         "source_commit": source_commit,
+        "source_tree_dirty": source_tree_dirty,
+        "dirty_fingerprint_sha256": dirty_fingerprint or "NOT_APPLICABLE",
         "generated_at_utc": generated_at,
         "overall_status": overall_status,
         "run_optional_tools": run_optional_tools,
@@ -1971,6 +2008,7 @@ def main() -> int:
     parser.add_argument("--source-commit")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--output-dir", default="docs/release/enterprise-release-evidence/security-scans")
+    parser.add_argument("--allow-dirty", action="store_true", help="permit non-release evidence from a dirty working tree")
     parser.add_argument("--run-optional-tools", action="store_true")
     parser.add_argument("--strict-optional-tools", action="store_true")
     parser.add_argument("--optional-timeout-seconds", type=int, default=180)

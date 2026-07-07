@@ -359,9 +359,11 @@ remove_created_account_if_safe() {
   if [ "${var_dir_preexisting:-yes}" = "no" ] && var_lib_is_empty; then
     rmdir /var/lib/sshflingd 2>/dev/null || true
   fi
-  remove_package_state
 
   if [ -d /etc/sshfling ] || [ -d /var/lib/sshflingd ]; then
+    if [ "${user_preexisting:-yes}" = "yes" ] && [ "${group_preexisting:-yes}" = "yes" ] && [ "${var_dir_preexisting:-yes}" = "yes" ]; then
+      remove_package_state
+    fi
     return 0
   fi
 
@@ -380,6 +382,8 @@ remove_created_account_if_safe() {
       delgroup --system sshflingd >/dev/null 2>&1 || delgroup sshflingd >/dev/null 2>&1 || true
     fi
   fi
+
+  remove_package_state
 }
 
 case "$1" in

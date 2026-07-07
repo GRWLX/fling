@@ -153,8 +153,10 @@ submit/staple/validate notarization when the workflow supplies the signing and
 notary environment variables. That is still not enterprise evidence by itself:
 Apple credential custody, required workflow variables, certificate metadata,
 notarization output, and release approval remain external. The Windows MSI build
-still produces `.msi` and `.zip` artifacts without Authenticode signing or
-`signtool` verification in source.
+can require Authenticode signing and `signtool` verification when the workflow
+supplies an approved signing certificate thumbprint and the runner has access to
+that certificate, but certificate custody and runner provisioning remain
+external evidence.
 
 Target state: Enterprise macOS and Windows artifacts are signed by approved certificates, notarized where applicable, and verified before release.
 
@@ -162,8 +164,8 @@ Remediation:
 
 1. Add release evidence fields for certificate subject, issuer, fingerprint, and expiration.
 2. Require notarization evidence for macOS `.pkg` releases.
-3. Add Authenticode signing and verification for Windows `.msi` and `.zip`
-   launchers, or attach a documented exception.
+3. Attach Authenticode signing and verification evidence for Windows `.msi`
+   releases, or attach a documented exception.
 4. Treat unsigned or unnotarized desktop artifacts as non-enterprise or
    pre-production unless they are excluded from enterprise desktop scope through a
    documented, time-bound exception.
@@ -446,7 +448,7 @@ Use this checklist before calling a release enterprise-ready.
 | APT/RPM repository signing verified | GPG fingerprint, `InRelease`, `Release.gpg`, RPM signature, `repomd.xml.asc` | Required for fleet Linux repos |
 | macOS package signed and notarized | Developer ID certificate and notarization output | Required for enterprise macOS |
 | Windows MSI signed | Authenticode verification output | Required for enterprise Windows |
-| Runtime behavior docs verified | README, wiki, and release notes confirm password default, explicit `--certificate` mode, prune limits, and uninstall limits | Required |
+| Runtime behavior docs verified | README, wiki, and release notes confirm password default with explicit `-t/--time`, explicit `--certificate` mode with CA prerequisite, prune selector requirements, and uninstall limits | Required |
 | Security policy published | Supported versions, private reporting channel, SLA, advisory process, and customer notification path | Required before enterprise release |
 | Package web verified before publish | `packaging/verify-public-web.sh` output and run ID | Required |
 | Install tests passed | `Package install tests` run ID | Required |
@@ -489,13 +491,15 @@ Retain for each quarter:
 - Repository settings must enforce protected tags, required reviews, and protected environments; these cannot be proven from docs alone.
 - Production signing secrets and key custody must be configured in GitHub or a managed secret store.
 - macOS notarization requires platform certificates, required workflow variables,
-  and retained notarization evidence. Windows Authenticode signing still requires
-  platform certificates and workflow changes.
+  and retained notarization evidence. Windows Authenticode signing requires
+  platform certificates, runner access to signing material, and retained
+  verification evidence.
 - GHCR container publishing now has source-defined test/security/container gates,
   SBOM/provenance, digest signing, and a named publish environment. GitHub
   environment reviewers, tag protection, vulnerability thresholds, and consumer
   digest/signature verification still require release evidence or policy.
-- Security scanning gates require workflow changes and triage ownership.
+- Strict security scanning gates require optional scanner availability,
+  vulnerability thresholds, and triage ownership.
 - Vulnerability-intake ownership and quarterly security-policy review need operational evidence in the release or compliance packet.
 - Broad OS, runtime, CPU architecture, hardware, ARM, IoT, or FPGA/SoC support
   claims require release-specific evidence; current artifact matrices and

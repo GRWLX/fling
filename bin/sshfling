@@ -24,6 +24,11 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    import pwd
+except ImportError:  # pragma: no cover - Windows does not provide pwd.
+    pwd = None
+
 VERSION = "0.1.13"
 DEFAULT_NETWORK = "timed-ssh-net"
 DEFAULT_SESSION_WRAPPER = "/usr/local/libexec/sshfling-session"
@@ -476,7 +481,35 @@ def write_text_atomic(path, content, mode=0o600, action="write"):
             os.fsync(tmp_file.fileno())
         reject_symlink_component(path, action)
         tmp_path.replace(path)
-        path.chmod(mode)
+    except Exception:
+        if fd is not None:
+            os.close(fd)
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+
+
+def write_bytes_atomic(path, content, mode=0o600, action="write"):
+    path = Path(path)
+    reject_symlink_component(path, action)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    reject_symlink_component(path, action)
+    fd = None
+    tmp_path = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+        tmp_path = Path(tmp_name)
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as tmp_file:
+            fd = None
+            tmp_file.write(content)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        reject_symlink_component(path, action)
+        tmp_path.replace(path)
     except Exception:
         if fd is not None:
             os.close(fd)
@@ -575,7 +608,7 @@ def cmd_doctor(args):
 
     add_check("python", True, path=sys.executable, version=sys.version.split()[0])
 
-    for name in ["docker", "ssh-keygen"]:
+    for name in ["docker", "ssh", "ssh-keygen", "ssh-keyscan"]:
         path = command_path(name)
         add_check(name, path is not None, path=path)
 
@@ -605,7 +638,11 @@ def cmd_doctor(args):
         network_exists = proc.returncode == 0
     add_check("docker network", network_exists, network=DEFAULT_NETWORK)
 
-    ok = all(check["ok"] for check in checks if check["name"] in ["python", "docker", "docker compose", "ssh-keygen", "templates"])
+    ok = all(
+        check["ok"]
+        for check in checks
+        if check["name"] in ["python", "docker", "docker compose", "ssh", "ssh-keygen", "ssh-keyscan", "templates"]
+    )
     payload = {"ok": ok, "command": "sshfling", "version": VERSION, "project_dir": str(project_dir), "checks": checks}
 
     if args.json:
@@ -791,8 +828,76 @@ def implied_access_level_for_username(username):
     return None
 
 
+def unix_user_identity(username):
+    username = str(username or "")
+    if not username:
+        return None
+    identity = {"username": username}
+    if pwd is not None:
+        try:
+            entry = pwd.getpwnam(username)
+            identity.update({"uid": int(entry.pw_uid), "gid": int(entry.pw_gid), "home": entry.pw_dir})
+            return identity
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    if not command_path("id"):
+        return None
+    uid_proc = run(["id", "-u", username], capture=True, check=False)
+    if uid_proc.returncode != 0:
+        return None
+    try:
+        identity["uid"] = int((uid_proc.stdout or "").strip())
+    except ValueError:
+        return None
+    gid_proc = run(["id", "-g", username], capture=True, check=False)
+    try:
+        if gid_proc.returncode == 0:
+            identity["gid"] = int((gid_proc.stdout or "").strip())
+    except ValueError:
+        pass
+    return identity
+
+
+def unix_identity_metadata(identity):
+    if not identity:
+        return {}
+    result = {}
+    for source_key, metadata_key in [("uid", "user_uid"), ("gid", "user_gid"), ("home", "user_home")]:
+        if identity.get(source_key) is not None:
+            result[metadata_key] = identity[source_key]
+    return result
+
+
+def expected_unix_identity(metadata):
+    identity = {}
+    if not isinstance(metadata, dict):
+        return identity
+    for metadata_key, target_key in [("user_uid", "uid"), ("user_gid", "gid"), ("user_home", "home")]:
+        if metadata.get(metadata_key) is not None:
+            identity[target_key] = metadata[metadata_key]
+    return identity
+
+
+def unix_identity_mismatch(username, expected):
+    expected = expected or {}
+    if not expected:
+        return None
+    current = unix_user_identity(username)
+    if not current:
+        return {"expected_identity": expected, "current_identity": None}
+    for key in ["uid", "gid", "home"]:
+        if key in expected and current.get(key) != expected[key]:
+            return {"expected_identity": expected, "current_identity": current}
+    return None
+
+
 def is_root_equivalent_user(username):
-    return str(username or "").strip().lower() in ROOT_EQUIVALENT_USERS
+    normalized = str(username or "").strip().lower()
+    if normalized in ROOT_EQUIVALENT_USERS:
+        return True
+    identity = unix_user_identity(username)
+    return bool(identity and identity.get("uid") == 0)
 
 
 def reject_root_equivalent_user_deletion(username, action):
@@ -945,10 +1050,7 @@ def write_policy(policy_file, max_time_seconds, max_connections, username=None, 
     policy = normalize_policy(existing)
     path = policy_file_path(policy_file)
     reject_symlink_component(path, "write policy")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    reject_symlink_component(path, "write policy")
-    path.write_text(json.dumps(policy, indent=2, sort_keys=True) + "\n")
-    path.chmod(0o644)
+    write_text_atomic(path, json.dumps(policy, indent=2, sort_keys=True) + "\n", 0o644, "write policy")
     policy["path"] = str(path)
     return policy
 
@@ -1062,20 +1164,37 @@ def sign_user_certificate(
 
 
 def create_ca_key(args):
-    ca_key = Path(args.ca_key).expanduser().resolve()
+    requested_ca_key = Path(args.ca_key).expanduser()
+    reject_symlink_component(requested_ca_key, "initialize CA key")
+    ca_key = requested_ca_key.resolve()
     ca_pub = Path(str(ca_key) + ".pub")
+    reject_symlink_component(ca_pub, "initialize CA public key")
+    force_replaced = bool(args.force and (ca_key.exists() or ca_pub.exists()))
 
     if (ca_key.exists() or ca_pub.exists()) and not args.force:
         result = {"ok": True, "status": "exists", "ca_key": str(ca_key), "ca_public_key": str(ca_pub)}
     else:
-        if args.force:
-            ca_key.unlink(missing_ok=True)
-            ca_pub.unlink(missing_ok=True)
         ca_key.parent.mkdir(parents=True, exist_ok=True)
-        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "sshfling-user-ca", "-f", str(ca_key)], capture=True)
-        ca_key.chmod(0o600)
-        ca_pub.chmod(0o644)
+        reject_symlink_component(ca_key, "initialize CA key")
+        reject_symlink_component(ca_pub, "initialize CA public key")
+        with tempfile.TemporaryDirectory(prefix=".sshfling-ca.", dir=str(ca_key.parent)) as tmp:
+            tmp_key = Path(tmp) / ca_key.name
+            tmp_pub = Path(str(tmp_key) + ".pub")
+            run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "sshfling-user-ca", "-f", str(tmp_key)], capture=True)
+            if not tmp_key.exists() or not tmp_pub.exists():
+                raise SSHFlingError("ssh-keygen did not produce a complete CA keypair.", 1)
+            tmp_key.chmod(0o600)
+            tmp_pub.chmod(0o644)
+            reject_symlink_component(ca_key, "replace CA key")
+            reject_symlink_component(ca_pub, "replace CA public key")
+            tmp_key.replace(ca_key)
+            tmp_pub.replace(ca_pub)
         result = {"ok": True, "status": "created", "ca_key": str(ca_key), "ca_public_key": str(ca_pub)}
+    if force_replaced:
+        result["warning"] = (
+            "CA rotation: replaced the existing SSHFling user CA keypair. "
+            "Update host trust and reissue affected certificates."
+        )
     return result
 
 
@@ -1085,6 +1204,8 @@ def cmd_ca_init(args):
     if args.json:
         emit_json(result)
     else:
+        if result.get("warning"):
+            eprint(f"warning: {result['warning']}")
         print(f"{result['status']}: {result['ca_key']}")
         print(f"public: {result['ca_public_key']}")
     return 0
@@ -1314,6 +1435,10 @@ def cmd_connect(before_args, target, after_args):
         "PreferredAuthentications=password,keyboard-interactive",
         "-o",
         "PubkeyAuthentication=no",
+        "-o",
+        "ForwardAgent=no",
+        "-o",
+        "ClearAllForwardings=yes",
     ] + before_args + [target] + after_args
     target_user, target_host = target.split("@", 1)
     audit_log(
@@ -1378,9 +1503,9 @@ def set_user_password(username, password):
 
 def ensure_unix_user(username):
     if unix_user_exists(username):
-        return {"user": username, "created": False}
+        return {"user": username, "created": False, "identity": unix_user_identity(username)}
     run(["useradd", "--create-home", "--shell", default_login_shell(), username])
-    return {"user": username, "created": True}
+    return {"user": username, "created": True, "identity": unix_user_identity(username)}
 
 
 def password_force_command(username, seconds, expires_at, session_wrapper, policy_file):
@@ -1400,6 +1525,10 @@ Match User {username}
     AuthenticationMethods password
     ForceCommand {force_command}
     AllowTcpForwarding no
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    PermitOpen none
+    PermitListen none
     X11Forwarding no
     PermitTunnel no
 """
@@ -1455,59 +1584,92 @@ def cmd_setup_password(args):
         )
     expires_at = int(time.time()) + seconds
     password = secrets.token_urlsafe(18)
-    if args.dry_run:
-        user_result = {"user": args.username, "created": not existing_user, "dry_run": True}
-    else:
-        user_result = ensure_unix_user(args.username)
-        set_user_password(args.username, password)
-
     wrapper_path = Path(args.session_wrapper).expanduser().resolve()
     config_dir = Path(args.password_sshd_config_dir).expanduser().resolve()
     config_path = config_dir / f"91-sshfling-password-{args.username}.conf"
+    metadata_path = password_grant_metadata_path(args.password_grant_dir, args.username)
     force_command = password_force_command(args.username, seconds, expires_at, str(wrapper_path), policy["path"])
     config = password_grant_config(args.username, force_command)
-    created_user = bool(user_result.get("created"))
-    metadata = {
-        "version": 1,
-        "auth": "password",
-        "managed_by": "sshfling",
-        "username": args.username,
-        "created_user": created_user,
-        "created_at": int(time.time()),
-        "seconds": seconds,
-        "expires_at": expires_at,
-        "config_path": str(config_path),
-        "session_wrapper": str(wrapper_path),
-        "policy_file": policy["path"],
-        "access_level": grant_access_level,
-    }
-
-    results = [
-        {"pre_prune": pre_prune},
-        install_file(resource_file("production/sshfling-session"), wrapper_path, 0o755, args.dry_run),
-        write_if_changed(config_path, config, 0o644, args.dry_run),
-        write_password_grant_metadata(args.password_grant_dir, args.username, metadata, args.dry_run),
-        user_result,
+    expected_lines = [
+        "passwordauthentication yes",
+        "kbdinteractiveauthentication no",
+        "pubkeyauthentication no",
+        "authenticationmethods password",
+        f"forcecommand {force_command}",
+        "allowtcpforwarding no",
+        "allowagentforwarding no",
+        "allowstreamlocalforwarding no",
+        "permitopen none",
+        "permitlisten none",
     ]
 
-    if not args.dry_run and args.validate:
-        results.append(
-            validate_sshd_effective(
-                args.username,
-                [
-                    "passwordauthentication yes",
-                    "kbdinteractiveauthentication no",
-                    "pubkeyauthentication no",
-                    "authenticationmethods password",
-                    f"forcecommand {force_command}",
-                ],
-                config_path,
-            )
-        )
+    rollback_paths = [wrapper_path, config_path, metadata_path]
+    for managed_path in rollback_paths:
+        reject_symlink_component(managed_path, "manage password grant path")
+    rollback_snapshots = [] if args.dry_run else [(path, snapshot_file(path)) for path in rollback_paths]
+    created_user = False
+    created_user_for_rollback = False
+    user_identity = None
+    user_result = {"user": args.username, "created": not existing_user, "dry_run": True}
+    results = [{"pre_prune": pre_prune}]
 
-    if not args.dry_run:
-        results.append(reload_sshd())
+    try:
+        results.append(install_file(resource_file("production/sshfling-session"), wrapper_path, 0o755, args.dry_run))
+        results.append(write_if_changed(config_path, config, 0o644, args.dry_run))
 
+        if not args.dry_run and args.validate:
+            results.append(validate_sshd_effective(args.username, expected_lines, config_path))
+
+        if not args.dry_run:
+            results.append(reload_sshd())
+            user_result = ensure_unix_user(args.username)
+            created_user = bool(user_result.get("created"))
+            created_user_for_rollback = created_user
+            user_identity = user_result.get("identity") or unix_user_identity(args.username)
+
+        metadata = {
+            "version": 1,
+            "auth": "password",
+            "managed_by": "sshfling",
+            "username": args.username,
+            "created_user": bool(user_result.get("created")),
+            "created_at": int(time.time()),
+            "seconds": seconds,
+            "expires_at": expires_at,
+            "config_path": str(config_path),
+            "session_wrapper": str(wrapper_path),
+            "policy_file": policy["path"],
+            "access_level": grant_access_level,
+            **unix_identity_metadata(user_identity),
+        }
+        results.append(write_password_grant_metadata(args.password_grant_dir, args.username, metadata, args.dry_run))
+        results.append(user_result)
+
+        if not args.dry_run:
+            set_user_password(args.username, password)
+            results.append({"user": args.username, "password": "set"})
+    except Exception as exc:
+        rollback = []
+        if not args.dry_run:
+            for path, snapshot in reversed(rollback_snapshots):
+                try:
+                    rollback.append(restore_file_snapshot(path, snapshot))
+                except Exception as rollback_exc:
+                    rollback.append({"path": str(path), "rollback_error": str(rollback_exc)})
+            if created_user_for_rollback:
+                try:
+                    rollback.append(delete_password_user(args.username, expected_identity=user_identity))
+                except SSHFlingError as rollback_exc:
+                    rollback.append({"user": args.username, "rollback_error": rollback_exc.message})
+            try:
+                rollback.append(reload_sshd())
+            except SSHFlingError as rollback_exc:
+                rollback.append({"reload": "sshd", "rollback_error": rollback_exc.message})
+        if isinstance(exc, SSHFlingError):
+            exc.details["rollback"] = rollback
+        raise
+
+    created_user = bool(user_result.get("created"))
     server_host = detect_server_host()
     payload = {
         "ok": True,
@@ -1592,14 +1754,15 @@ def cmd_setup_certificate(args):
     if not getattr(args, "certificate", False):
         raise SSHFlingError("Certificate setup requires --certificate.", 2)
     require_root("temporary SSH access")
+    if args.dry_run:
+        raise SSHFlingError("Certificate setup does not support --dry-run because it signs key material.", 2)
     if not args.username:
         args.username = random_username()
     ca_key = Path(args.ca_key).expanduser().resolve()
     ca_pub = Path(str(ca_key) + ".pub")
     if not ca_key.exists() or not ca_pub.exists():
-        ca_result = create_ca_key(argparse.Namespace(ca_key=str(ca_key), force=False))
-    else:
-        ca_result = {"ok": True, "status": "exists", "ca_key": str(ca_key), "ca_public_key": str(ca_pub)}
+        raise SSHFlingError(f"CA keypair does not exist: {ca_key}. Run `sshfling ca init --ca-key {ca_key}` first.", 2)
+    ca_result = {"ok": True, "status": "exists", "ca_key": str(ca_key), "ca_public_key": str(ca_pub)}
 
     key_material = {"generated_key": False, "private_key": None, "public_key": args.public_key_file}
     public_key_file = args.public_key_file
@@ -2527,11 +2690,8 @@ def write_if_changed(path, content, mode=0o644, dry_run=False):
     reject_symlink_component(path, "write")
     if dry_run:
         return {"path": str(path), "changed": not path.exists() or path.read_text() != content, "dry_run": True}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    reject_symlink_component(path, "write")
     changed = not path.exists() or path.read_text() != content
-    path.write_text(content)
-    path.chmod(mode)
+    write_text_atomic(path, content, mode, "write")
     return {"path": str(path), "changed": changed}
 
 
@@ -2541,10 +2701,7 @@ def install_file(src, dst, mode=0o755, dry_run=False):
     reject_symlink_component(dst, "install")
     if dry_run:
         return {"path": str(dst), "source": str(src), "dry_run": True}
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    reject_symlink_component(dst, "install")
-    shutil.copy2(src, dst)
-    dst.chmod(mode)
+    write_bytes_atomic(dst, src.read_bytes(), mode, "install")
     return {"path": str(dst), "source": str(src)}
 
 
@@ -2561,12 +2718,12 @@ def snapshot_file(path):
 
 def restore_file_snapshot(path, snapshot):
     path = Path(path)
+    reject_symlink_component(path, "restore file snapshot")
     if snapshot.get("directory"):
         return {"path": str(path), "status": "left-directory"}
     if snapshot.get("exists"):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(snapshot["content"])
-        path.chmod(snapshot.get("mode", 0o644))
+        write_bytes_atomic(path, snapshot["content"], snapshot.get("mode", 0o644), "restore file snapshot")
         return {"path": str(path), "restored": True}
     if not path.exists():
         return {"path": str(path), "status": "missing"}
@@ -2672,7 +2829,7 @@ def delete_host_user(username, marker_dir=DEFAULT_HOST_USER_MARKER_DIR, dry_run=
             marker_path=str(marker_path),
         )
     reject_root_equivalent_user_deletion(username, "delete")
-    result = delete_password_user(username, dry_run)
+    result = delete_password_user(username, dry_run, expected_identity=expected_unix_identity(metadata))
     result["marker_path"] = str(marker_path)
     if dry_run:
         result["would_remove_marker"] = True
@@ -2702,6 +2859,7 @@ def write_password_grant_metadata(grant_dir, username, metadata, dry_run=False):
 
 def remove_password_grant_config(path, username, dry_run=False):
     path = Path(path)
+    reject_symlink_component(path, "remove password grant config")
     if not path.exists():
         return {"path": str(path), "status": "missing"}
     content = path.read_text()
@@ -2716,6 +2874,7 @@ def remove_password_grant_config(path, username, dry_run=False):
 
 def remove_file(path, dry_run=False):
     path = Path(path)
+    reject_symlink_component(path, "remove file")
     if not path.exists():
         return {"path": str(path), "status": "missing"}
     if path.is_dir():
@@ -2785,15 +2944,17 @@ def remove_policy_user(policy_file, username, dry_run=False):
         return {"path": str(path), "user": username, "would_remove": True, "dry_run": True}
 
     del policy["users"][username]
-    reject_symlink_component(path, "update policy")
-    path.write_text(json.dumps(policy, indent=2, sort_keys=True) + "\n")
-    path.chmod(0o644)
+    write_text_atomic(path, json.dumps(policy, indent=2, sort_keys=True) + "\n", 0o644, "update policy")
     return {"path": str(path), "user": username, "removed": True}
 
 
-def lock_password_user(username, dry_run=False):
+def lock_password_user(username, dry_run=False, expected_identity=None):
+    reject_root_equivalent_user_deletion(username, "lock")
     if run(["id", "-u", username], capture=True, check=False).returncode != 0:
         return {"user": username, "status": "missing"}
+    mismatch = unix_identity_mismatch(username, expected_identity)
+    if mismatch:
+        return {"user": username, "status": "skipped-user-mismatch", **mismatch}
     if dry_run:
         return {"user": username, "would_lock": True, "dry_run": True}
 
@@ -2818,10 +2979,13 @@ def lock_password_user(username, dry_run=False):
     return {"user": username, "locked": locked, "expired": expired, "attempts": attempts}
 
 
-def delete_password_user(username, dry_run=False):
+def delete_password_user(username, dry_run=False, expected_identity=None):
     reject_root_equivalent_user_deletion(username, "delete")
     if run(["id", "-u", username], capture=True, check=False).returncode != 0:
         return {"user": username, "status": "missing"}
+    mismatch = unix_identity_mismatch(username, expected_identity)
+    if mismatch:
+        return {"user": username, "status": "skipped-user-mismatch", **mismatch}
     if dry_run:
         return {"user": username, "would_delete": True, "dry_run": True}
     if not command_path("userdel"):
@@ -2836,6 +3000,8 @@ def delete_password_user(username, dry_run=False):
 
 
 def prune_password_grants(grant_dir, username=None, all_grants=False, delete_users=False, dry_run=False):
+    if bool(username) == bool(all_grants):
+        raise SSHFlingError("Use exactly one of --username or --all for password prune.", 2)
     now = int(time.time())
     root = Path(grant_dir).expanduser()
     if username:
@@ -2882,13 +3048,13 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
                 }
             )
             continue
-        if metadata.get("created_user") is True and is_root_equivalent_user(grant_username):
+        if is_root_equivalent_user(grant_username):
             results.append(
                 {
                     "metadata_path": str(path),
                     "username": grant_username,
                     "status": "skipped-root-equivalent",
-                    "reason": "refusing to delete root-equivalent Unix user from password grant metadata",
+                    "reason": "refusing to mutate root-equivalent Unix user from password grant metadata",
                 }
             )
             continue
@@ -2905,6 +3071,7 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
             continue
 
         item = {"metadata_path": str(path), "username": grant_username, "expires_at": expires_at, "status": "pruned"}
+        expected_identity = expected_unix_identity(metadata)
         config_path = metadata.get("config_path")
         config_verified_for_removal = False
         if config_path:
@@ -2917,13 +3084,13 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
 
         if metadata.get("created_user") is True:
             if delete_users and config_verified_for_removal:
-                item["user"] = delete_password_user(grant_username, dry_run)
+                item["user"] = delete_password_user(grant_username, dry_run, expected_identity=expected_identity)
             else:
-                item["user"] = lock_password_user(grant_username, dry_run)
+                item["user"] = lock_password_user(grant_username, dry_run, expected_identity=expected_identity)
                 if delete_users:
                     item["user"]["delete_skipped"] = "managed sshd config was not verified for removal"
         else:
-            item["user"] = lock_password_user(grant_username, dry_run)
+            item["user"] = lock_password_user(grant_username, dry_run, expected_identity=expected_identity)
             item["user"]["existing_user"] = True
             if delete_users:
                 item["user"]["delete_skipped"] = "existing Unix user was not created by sshfling"
@@ -2997,6 +3164,10 @@ Match User {args.user}
     KbdInteractiveAuthentication no
     AuthenticationMethods publickey
     AllowTcpForwarding no
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    PermitOpen none
+    PermitListen none
     X11Forwarding no
     PermitTunnel no
 """
@@ -3043,6 +3214,7 @@ Match User {args.user}
             if run(["id", "-u", args.user], capture=True, check=False).returncode != 0:
                 run(["useradd", "--create-home", "--shell", default_login_shell(), args.user])
                 created_user_for_rollback = True
+                created_identity = unix_user_identity(args.user)
                 if command_path("openssl"):
                     password = run(["openssl", "rand", "-base64", "32"], capture=True).stdout.strip()
                     password_hash = run(["openssl", "passwd", "-6", password], capture=True).stdout.strip()
@@ -3055,6 +3227,7 @@ Match User {args.user}
                     "created_user": True,
                     "created_at": int(time.time()),
                     "created_at_utc": utc_iso(),
+                    **unix_identity_metadata(created_identity),
                 }
                 results.append(write_host_user_marker(host_user_marker_dir, args.user, marker))
                 results.append({"created_user": args.user})
@@ -3068,6 +3241,11 @@ Match User {args.user}
                         f"authorizedprincipalsfile {principals_dir}/%u",
                         "passwordauthentication no",
                         "authenticationmethods publickey",
+                        "allowtcpforwarding no",
+                        "allowagentforwarding no",
+                        "allowstreamlocalforwarding no",
+                        "permitopen none",
+                        "permitlisten none",
                     ],
                     sshd_config,
                 )
@@ -3085,7 +3263,7 @@ Match User {args.user}
                     rollback.append({"path": str(path), "rollback_error": str(rollback_exc)})
             if created_user_for_rollback:
                 try:
-                    rollback.append(delete_password_user(args.user))
+                    rollback.append(delete_password_user(args.user, expected_identity=created_identity))
                 except SSHFlingError as rollback_exc:
                     rollback.append({"user": args.user, "rollback_error": rollback_exc.message})
         if isinstance(exc, SSHFlingError):
@@ -3908,7 +4086,6 @@ def build_parser():
         usage="sshfling [-t TIME] [--username USERNAME] [--certificate] [-k] [command ...]",
         description="Grant or kill temporary SSH access.",
         epilog="""examples:
-  sudo sshfling
   sudo sshfling -t 10m
   sudo sshfling -t 5m --username temp-remote
   sudo sshfling --certificate -t 10m --public-key-file ~/.ssh/id_ed25519.pub
@@ -4235,7 +4412,7 @@ def main(argv=None):
 
         if not args.command:
             if args.time is None:
-                args.time = effective_policy(load_policy(args.policy_file), args.login_user or args.username)["max_time_seconds"]
+                raise SSHFlingError("Temporary access requires an explicit -t/--time lifetime.", 2)
             return cmd_setup(args)
 
         if not hasattr(args, "func"):

@@ -23,10 +23,15 @@ For longer enterprise workflows, SSHFling can issue access up to 24 hours. Activ
 For environments that require OpenSSH user certificates instead of generated local passwords, an operator can use explicit certificate mode:
 
 ```bash
+sudo sshfling ca init --ca-key /etc/sshfling/ca_user_ed25519
+sudo sshfling host install --user deploy --ca-pub /etc/sshfling/ca_user_ed25519.pub
 sudo sshfling --certificate -t 10m --username ticket-1234
 ```
 
-Certificate mode can also be prepared once with `sshfling host install`, which configures OpenSSH to trust a local user certificate authority. An explicit `--certificate` grant then issues a short-lived certificate and prints a normal `ssh` command.
+Certificate mode must be prepared with an existing CA keypair and `sshfling
+host install`, which configures OpenSSH to trust that user certificate
+authority. An explicit `--certificate` grant then issues a short-lived
+certificate and prints a normal `ssh` command.
 
 ## Security Properties
 

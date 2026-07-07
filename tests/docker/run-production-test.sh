@@ -53,6 +53,8 @@ grep -q -- "web" "$work/help.out"
 SSHFLING_CONNECT_DRY_RUN=1 bin/sshfling -p 2222 -o StrictHostKeyChecking=no s234@1.0.0.1 whoami >"$work/connect-dry-run.out"
 grep -q -- "PreferredAuthentications=password,keyboard-interactive" "$work/connect-dry-run.out"
 grep -q -- "PubkeyAuthentication=no" "$work/connect-dry-run.out"
+grep -q -- "ForwardAgent=no" "$work/connect-dry-run.out"
+grep -q -- "ClearAllForwardings=yes" "$work/connect-dry-run.out"
 grep -q -- "-p 2222" "$work/connect-dry-run.out"
 grep -q -- "s234@1.0.0.1 whoami" "$work/connect-dry-run.out"
 
@@ -328,6 +330,8 @@ grep -q "Match User s234" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
 grep -q "ForceCommand /usr/local/libexec/sshfling-session --max-seconds 20 --max-connections 1 --username s234 --login-user s234 --policy-file /etc/sshfling/policy.json --expires-at" /etc/ssh/sshd_config.d/91-sshfling-password-s234.conf
 test -f /var/lib/sshfling/password-grants/s234.json
 grep -q '"created_user": true' /var/lib/sshfling/password-grants/s234.json
+grep -q '"user_uid":' /var/lib/sshfling/password-grants/s234.json
+grep -q '"user_gid":' /var/lib/sshfling/password-grants/s234.json
 
 sshd -t
 kill "$sshd_pid"
@@ -445,6 +449,15 @@ PY
 # shellcheck source=/dev/null
 source "$work/password-prune-users.env"
 
+set +e
+bin/sshfling --json password prune --delete-users >"$work/password-prune-ambiguous.json"
+password_prune_ambiguous_code="$?"
+set -e
+if [[ "$password_prune_ambiguous_code" -eq 0 ]]; then
+  fail "password prune --delete-users without --username or --all unexpectedly succeeded"
+fi
+grep -q "exactly one" "$work/password-prune-ambiguous.json"
+
 log "password prune --username --delete-users protects active managed users"
 bin/sshfling --json password prune --username s235active --delete-users >"$work/password-prune-active-user.json"
 python3 - "$work/password-prune-active-user.json" <<'PY'
@@ -485,6 +498,40 @@ if id -u s239named >/dev/null 2>&1; then
 fi
 test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s239named.conf
 test ! -e /var/lib/sshfling/password-grants/s239named.json
+sshd -t
+
+log "password prune --username --delete-users refuses mismatched reused user identity"
+bin/sshfling --json -t 1s \
+  --username s240reuse >"$work/password-reuse-grant.json"
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("/var/lib/sshfling/password-grants/s240reuse.json")
+metadata = json.loads(path.read_text())
+metadata["user_uid"] = int(metadata.get("user_uid", 0)) + 100000
+metadata["user_gid"] = int(metadata.get("user_gid", 0)) + 100000
+metadata["user_home"] = "/home/s240reuse-recreated"
+path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+PY
+sleep 2
+bin/sshfling --json password prune --username s240reuse --delete-users >"$work/password-prune-reuse.json"
+python3 - "$work/password-prune-reuse.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["count"] == 1
+result = payload["results"][0]
+assert result["status"] == "pruned", result
+assert result["config"]["removed"] is True, result
+assert result["metadata"]["removed"] is True, result
+assert result["user"]["status"] == "skipped-user-mismatch", result
+PY
+id -u s240reuse >/dev/null
+test ! -e /etc/ssh/sshd_config.d/91-sshfling-password-s240reuse.conf
+test ! -e /var/lib/sshfling/password-grants/s240reuse.json
+userdel --remove s240reuse >/dev/null 2>&1 || userdel s240reuse >/dev/null 2>&1 || true
 sshd -t
 
 bin/sshfling --json password prune --all --delete-users >"$work/password-prune-all.json"
@@ -803,35 +850,56 @@ assert payload["private_key"]
 assert payload["out"]
 PY
 
-log "certificate setup defaults to 24 hours with a random username"
+log "certificate setup requires an explicit lifetime"
+set +e
 bin/sshfling --json --certificate \
   --ca-key "$work/ca_user_ed25519" \
   >"$work/default-setup.json"
-python3 - "$work/default-setup.json" <<'PY'
-import json
-import re
-import sys
-payload = json.load(open(sys.argv[1]))
-assert payload["ok"] is True
-assert payload["seconds"] == 86400
-assert re.fullmatch(r"s[0-9]{6}", payload["username"]), payload["username"]
-PY
+default_setup_code="$?"
+set -e
+if [[ "$default_setup_code" -eq 0 ]]; then
+  fail "expected certificate setup without -t to fail"
+fi
+grep -q "explicit -t/--time" "$work/default-setup.json"
 
-log "bare sshfling defaults to password access"
+set +e
+bin/sshfling --json --certificate --dry-run -t 20s \
+  --ca-key "$work/ca_user_ed25519" \
+  --session-dir "$work/cert-dry-run-sessions" \
+  >"$work/cert-dry-run.json"
+cert_dry_run_code="$?"
+set -e
+if [[ "$cert_dry_run_code" -eq 0 ]]; then
+  fail "expected certificate dry-run to fail without writing key material"
+fi
+grep -q "does not support --dry-run" "$work/cert-dry-run.json"
+test ! -e "$work/cert-dry-run-sessions"
+
+set +e
+bin/sshfling --json --certificate -t 20s \
+  --ca-key "$work/missing-ca-user" \
+  >"$work/cert-missing-ca.json"
+cert_missing_ca_code="$?"
+set -e
+if [[ "$cert_missing_ca_code" -eq 0 ]]; then
+  fail "expected certificate setup with missing CA to fail"
+fi
+grep -q "CA keypair does not exist" "$work/cert-missing-ca.json"
+
+log "bare sshfling requires explicit lifetime"
+set +e
 bin/sshfling --json --dry-run >"$work/default-password-setup.json"
+default_password_setup_code="$?"
+set -e
+if [[ "$default_password_setup_code" -eq 0 ]]; then
+  fail "expected bare password setup without -t to fail"
+fi
 python3 - "$work/default-password-setup.json" <<'PY'
 import json
-import re
 import sys
 payload = json.load(open(sys.argv[1]))
-assert payload["ok"] is True
-assert payload["auth"] == "password"
-assert payload["seconds"] == 86400
-assert re.fullmatch(r"s[0-9]{6}", payload["username"]), payload["username"]
-assert payload["password"]
-assert "generated_key" not in payload
-assert "private_key" not in payload
-assert "out" not in payload
+assert payload["ok"] is False
+assert "explicit -t/--time" in payload["error"]["message"], payload
 PY
 
 log "custom user-specific install policy caps default and requested time"
@@ -852,6 +920,7 @@ grep -q "cannot exceed 45s" "$work/short-too-long.err"
 bin/sshfling --json --certificate \
   --policy-file "$work/short-policy.json" \
   --login-user root \
+  -t 45s \
   --ca-key "$work/ca_user_ed25519" >"$work/short-default.json"
 python3 - "$work/short-default.json" <<'PY'
 import json

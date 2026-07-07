@@ -39,11 +39,20 @@ Optional host-state cleanup before package removal:
 
 ```bash
 sudo sshfling shutdown || true
-sudo sshfling password prune
+sudo sshfling password prune --all
 sudo sshfling host uninstall --username temp-remote --dry-run
 sudo sshfling host uninstall --username temp-remote --reload
 sudo systemctl disable --now sshflingd 2>/dev/null || true
 ```
+
+Password prune requires exactly one selector: `--all` to scan the tracked grant
+store or `--username USER` for targeted cleanup. It only removes expired grants
+and leaves active grants in place. By default, expired SSHFling-created Unix
+users are locked and expired; `--delete-users` deletes expired SSHFling-created
+users only after managed sshd config removal is verified. Existing users that
+were explicitly allowed with `--allow-existing-user` are locked and expired but
+are never deleted by `--delete-users`. Root-equivalent users are never mutated
+from password-grant metadata or host-user markers.
 
 Use `sshfling host uninstall --delete-user` only for Unix accounts created by
 `sshfling host install --create-user`. SSHFling requires its host-user marker
@@ -175,8 +184,8 @@ sudo apt update
 
 ## Public RPM Repository
 
-Use this path for RHEL, Fedora, Rocky Linux, and AlmaLinux fleet installs from
-the published Pages package site.
+Use this path for RHEL-family fleet installs from the published Pages package
+site, including RHEL, Fedora, Rocky Linux, AlmaLinux, and UBI.
 
 Install:
 
@@ -389,7 +398,12 @@ $UninstallRoots = @(
   "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
 $Products = Get-ItemProperty -Path $UninstallRoots -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -eq "SSHFling" }
+  Where-Object {
+    $_.DisplayName -eq "SSHFling" -and
+    $_.Publisher -eq "SSHFling Maintainers" -and
+    $_.WindowsInstaller -eq 1 -and
+    $_.URLInfoAbout -eq "https://github.com/GRWLX/sshfling"
+  }
 foreach ($Product in $Products) {
   $ProductCode = $Product.PSChildName
   if ($ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {

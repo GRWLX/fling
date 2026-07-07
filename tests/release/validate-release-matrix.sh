@@ -274,6 +274,27 @@ if python3 "$repo_root/tools/release_matrix_validate.py" \
 fi
 grep -Fq "evidence_sha256 is not a real sha256" /tmp/sshfling-release-matrix-fake-sha.log
 
+{
+  echo "row_id,readiness_status,result,evidence_ref,evidence_sha256,source_commit,blocker_reason,actual_result"
+  printf 'row-blocked,BLOCKED,blocked,NONE,NONE,abc123,external signing evidence missing,NOT_APPLICABLE\n'
+} >"$tmpdir/blocked.csv"
+write_manifest "$tmpdir/blocked-manifest.json" '[]'
+python3 "$repo_root/tools/release_matrix_validate.py" \
+  --repo-root "$repo_root" \
+  --matrix "$tmpdir/blocked.csv" \
+  --manifest "$tmpdir/blocked-manifest.json" \
+  --max-errors 5 >/tmp/sshfling-release-matrix-blocked-shape.log
+if python3 "$repo_root/tools/release_matrix_validate.py" \
+  --repo-root "$repo_root" \
+  --matrix "$tmpdir/blocked.csv" \
+  --manifest "$tmpdir/blocked-manifest.json" \
+  --require-pass \
+  --max-errors 5 >/tmp/sshfling-release-matrix-blocked-strict.log 2>&1; then
+  echo "expected --require-pass to reject BLOCKED rows" >&2
+  exit 1
+fi
+grep -Fq "row is not allowed by --require-pass" /tmp/sshfling-release-matrix-blocked-strict.log
+
 release_version="1.2.3"
 release_dist="$tmpdir/release-dist"
 generated_dir="$tmpdir/generated"
@@ -356,6 +377,7 @@ python3 "$repo_root/tools/release_security_scan.py" \
   --repo-root "$repo_root" \
   --version "$release_version" \
   --source-commit abc123 \
+  --allow-dirty \
   --output-dir "$security_output" >/tmp/sshfling-release-security-scan.log
 
 for evidence_file in \
@@ -391,6 +413,8 @@ dependencies = baseline["dependency_inventory"]["dependencies"]
 optional_tools = {item["name"]: item for item in payload["optional_tools"]}
 
 assert payload["overall_status"] == "pass"
+assert "source_tree_dirty" in payload
+assert "dirty_fingerprint_sha256" in payload
 assert baseline["secret_scan"]["status"] == "pass"
 assert baseline["license_scan"]["status"] == "pass"
 assert baseline["shell_static"]["status"] == "pass"

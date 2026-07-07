@@ -32,10 +32,34 @@ $PackageDescription = "Temporary SSH access broker and CLI"
 $UninstallScope = "Uninstall removes package files and PATH entry only; host SSH state, local policy, CA material, and dependencies are managed separately."
 $DependencyScope = "The MSI does not bundle or remove Python, OpenSSH, or Windows OpenSSH Server components."
 $WindowsStateScope = "The MSI does not create Windows services, scheduled tasks, or other Windows persistence entries."
+$RequireAuthenticode = $env:SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE -match '^(1|true|TRUE|yes|YES)$'
+$SignCertSha1 = $env:SSHFLING_WINDOWS_SIGN_CERT_SHA1
+$TimestampUrl = if ($env:SSHFLING_WINDOWS_SIGN_TIMESTAMP_URL) { $env:SSHFLING_WINDOWS_SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
 
 foreach ($tool in @("candle.exe", "light.exe", "heat.exe")) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
     throw "WiX Toolset v3 is required. Missing $tool on PATH."
+  }
+}
+if ($RequireAuthenticode) {
+  if (-not (Get-Command signtool.exe -ErrorAction SilentlyContinue)) {
+    throw "signtool.exe is required when SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE is true."
+  }
+  if (-not $SignCertSha1) {
+    throw "SSHFLING_WINDOWS_SIGN_CERT_SHA1 is required when SSHFLING_WINDOWS_REQUIRE_AUTHENTICODE is true."
+  }
+}
+
+function Invoke-CheckedNative {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Arguments
+  )
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "$FilePath failed with exit code $LASTEXITCODE"
   }
 }
 
@@ -102,13 +126,13 @@ $HarvestedWxs = Join-Path $BuildRoot "harvested.wxs"
 $WixObj = Join-Path $BuildRoot "sshfling.wixobj"
 $HarvestedObj = Join-Path $BuildRoot "harvested.wixobj"
 
-heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg -gg -var var.ProductDir -out $HarvestedWxs
+Invoke-CheckedNative heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg -gg -var var.ProductDir -out $HarvestedWxs
 
 @"
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="$ProductCode" Name="SSHFling" Language="1033" Version="$Version" Manufacturer="$Manufacturer" UpgradeCode="$UpgradeCode">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Manufacturer="$Manufacturer" Description="$PackageDescription" Comments="$UninstallScope" />
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" Manufacturer="$Manufacturer" Description="$PackageDescription" Comments="$UninstallScope" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of SSHFling is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Property Id="ARPCOMMENTS" Value="$UninstallScope" />
@@ -118,7 +142,7 @@ heat.exe dir $ProductDir -nologo -cg SSHFlingFiles -dr INSTALLFOLDER -srd -sreg 
     <Property Id="ARPNOREPAIR" Value="1" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFilesFolder">
+      <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="SSHFling">
           <Component Id="PathComponent" Guid="5B92775A-4A2D-4E65-AE38-43B17117697D">
             <RegistryValue Root="HKLM" Key="Software\SSHFling" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes" />
@@ -149,15 +173,25 @@ foreach ($wixSource in @($Wxs, $HarvestedWxs)) {
   }
 }
 
-candle.exe -nologo -dProductDir="$ProductDir" -out $WixObj $Wxs
-candle.exe -nologo -dProductDir="$ProductDir" -out $HarvestedObj $HarvestedWxs
 $MsiPath = Join-Path $Dist "sshfling-$Version.msi"
 $ZipPath = Join-Path $Dist "sshfling-$Version-windows.zip"
+Remove-Item -Force $MsiPath, $ZipPath -ErrorAction SilentlyContinue
 
-light.exe -nologo -out $MsiPath $WixObj $HarvestedObj
+Invoke-CheckedNative candle.exe -nologo -arch x64 -dProductDir="$ProductDir" -out $WixObj $Wxs
+Invoke-CheckedNative candle.exe -nologo -arch x64 -dProductDir="$ProductDir" -out $HarvestedObj $HarvestedWxs
+Invoke-CheckedNative light.exe -nologo -out $MsiPath $WixObj $HarvestedObj
+if (-not (Test-Path $MsiPath) -or (Get-Item $MsiPath).Length -le 0) {
+  throw "MSI was not created: $MsiPath"
+}
+if ($RequireAuthenticode) {
+  Invoke-CheckedNative signtool.exe sign /fd SHA256 /sha1 $SignCertSha1 /tr $TimestampUrl /td SHA256 $MsiPath
+  Invoke-CheckedNative signtool.exe verify /pa /tw $MsiPath
+}
 
-Remove-Item -Force $ZipPath -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $ProductDir "*") -DestinationPath $ZipPath
+if (-not (Test-Path $ZipPath) -or (Get-Item $ZipPath).Length -le 0) {
+  throw "Windows ZIP was not created: $ZipPath"
+}
 
 Write-Output $MsiPath
 Write-Output $ZipPath

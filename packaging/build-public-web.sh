@@ -18,6 +18,7 @@ repo_name="${repository#*/}"
 owner_pages="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')"
 base_host="${owner_pages}.github.io"
 base_url="https://${base_host}/${repo_name}"
+pkg_identifier="${SSHFLING_PKG_IDENTIFIER:-io.sshfling.cli}"
 repo_signed=0
 repo_signing_key=""
 repo_signing_fingerprint=""
@@ -437,9 +438,7 @@ uninstall_apt() {
   fi
   sudo rm -f \
     /etc/apt/sources.list.d/sshfling.list \
-    /etc/apt/sources.list.d/fling.list \
     /etc/apt/preferences.d/sshfling \
-    /etc/apt/preferences.d/fling \
     /usr/share/keyrings/sshfling-repo.gpg
   sudo apt-get update || true
 }
@@ -486,7 +485,6 @@ uninstall_rpm() {
   fi
   sudo rm -f \
     /etc/yum.repos.d/sshfling.repo \
-    /etc/yum.repos.d/fling.repo \
     /etc/pki/rpm-gpg/RPM-GPG-KEY-sshfling
 }
 
@@ -548,13 +546,13 @@ sudo installer -pkg "\$tmp/$pkg_name" -target /
 SH
 chmod 0755 "$public_dir/macos/install-pkg.sh"
 
-cat >"$public_dir/macos/uninstall-pkg.sh" <<'SH'
+cat >"$public_dir/macos/uninstall-pkg.sh" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
 
 sudo rm -f /usr/local/bin/sshfling
 sudo rm -rf /usr/local/share/sshfling
-sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&1 || true
+sudo pkgutil --forget "$pkg_identifier" >/dev/null 2>&1 || true
 
 echo "Removed SSHFling package files."
 echo "Left /etc/sshfling in place for local policy or CA material."
@@ -572,7 +570,14 @@ Invoke-WebRequest -Uri "$base_url/downloads/$msi_name" -OutFile \$installer
 if (\$actualSha256 -ne \$expectedSha256) {
   throw "SHA-256 mismatch for $msi_name"
 }
-Start-Process msiexec.exe -Wait -ArgumentList "/i", \$installer, "/qn"
+\$signature = Get-AuthenticodeSignature -FilePath \$installer
+if (\$signature.Status -ne "Valid") {
+  throw "MSI Authenticode signature is not valid: \$(\$signature.Status)"
+}
+\$proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/i", \$installer, "/qn", "/norestart")
+if (\$proc.ExitCode -notin @(0, 3010, 1641)) {
+  throw "msiexec install failed with exit code \$(\$proc.ExitCode)"
+}
 SH
 
 cat >"$public_dir/windows/uninstall.ps1" <<'SH'
@@ -584,7 +589,12 @@ $uninstallRoots = @(
 )
 
 $products = Get-ItemProperty -Path $uninstallRoots -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -eq "SSHFling" }
+  Where-Object {
+    $_.DisplayName -eq "SSHFling" -and
+    $_.Publisher -eq "SSHFling Maintainers" -and
+    $_.WindowsInstaller -eq 1 -and
+    $_.URLInfoAbout -eq "https://github.com/GRWLX/sshfling"
+  }
 
 if (-not $products) {
   Write-Output "SSHFling is not installed."
@@ -596,7 +606,10 @@ foreach ($product in $products) {
   if ($productCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {
     throw "Could not determine MSI product code for SSHFling."
   }
-  Start-Process msiexec.exe -Wait -ArgumentList "/x", $productCode, "/qn", "/norestart"
+  $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/x", $productCode, "/qn", "/norestart")
+  if ($proc.ExitCode -notin @(0, 3010, 1605, 1614, 1641)) {
+    throw "msiexec uninstall failed with exit code $($proc.ExitCode)"
+  }
 }
 
 Write-Output "Removed SSHFling."
@@ -714,7 +727,7 @@ sudo bash "\$tmp/install-pkg.sh"</code></pre>
   <p>Uninstall:</p>
   <pre><code>sudo rm -f /usr/local/bin/sshfling
 sudo rm -rf /usr/local/share/sshfling
-sudo pkgutil --forget io.sshfling.cli >/dev/null 2>&amp;1 || true</code></pre>
+sudo pkgutil --forget $pkg_identifier >/dev/null 2>&amp;1 || true</code></pre>
   <p>The macOS uninstall commands preserve /etc/sshfling, host SSH configuration, CA material, grant state, Python, and OpenSSH for separate fleet policy.</p>
   <h2>Windows MSI</h2>
   <p>Enterprise Windows distribution should use Authenticode-signed installers and verify signatures before deployment. This helper is a convenience wrapper around the published MSI artifact.</p>
@@ -727,11 +740,17 @@ Invoke-WebRequest -Uri "$base_url/windows/install.ps1" -OutFile \$installer
   "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
 \$products = Get-ItemProperty -Path \$uninstallRoots -ErrorAction SilentlyContinue |
-  Where-Object { \$_.DisplayName -eq "SSHFling" }
+  Where-Object {
+    \$_.DisplayName -eq "SSHFling" -and
+    \$_.Publisher -eq "SSHFling Maintainers" -and
+    \$_.WindowsInstaller -eq 1 -and
+    \$_.URLInfoAbout -eq "https://github.com/GRWLX/sshfling"
+  }
 foreach (\$product in \$products) {
   \$productCode = \$product.PSChildName
   if (\$productCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { throw "Could not determine MSI product code for SSHFling." }
-  Start-Process msiexec.exe -Wait -ArgumentList "/x", \$productCode, "/qn", "/norestart"
+  \$proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/x", \$productCode, "/qn", "/norestart")
+  if (\$proc.ExitCode -notin @(0, 3010, 1605, 1614, 1641)) { throw "msiexec uninstall failed with exit code \$(\$proc.ExitCode)" }
 }</code></pre>
   <p>MSI uninstall removes installer-managed files and PATH state only. Python, OpenSSH, Windows OpenSSH Server, host SSH configuration, CA material, grant state, and external policy remain under fleet ownership.</p>
   <h2>More ecosystems</h2>

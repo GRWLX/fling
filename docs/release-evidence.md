@@ -198,10 +198,10 @@ Record the behavior contract that users and support teams rely on.
 
 | Behavior | Expected release statement | Evidence |
 | --- | --- | --- |
-| Password default | Bare `sudo sshfling` creates temporary password access. | README/release-notes link: |
-| Explicit certificate mode | Certificate access requires `--certificate`; certificate-only setup options fail without it. | README/release-notes link: |
+| Password default | Password mode is the default access type, but temporary access requires an explicit `-t/--time` lifetime such as `sudo sshfling -t 10m`; bare `sudo sshfling` fails before creating access. | README/release-notes link: |
+| Explicit certificate mode | Certificate access requires `--certificate`; certificate-only setup options fail without it; certificate setup requires an existing CA keypair and fails before creating client material if the CA is missing. | README/release-notes link: |
 | Access-level classification | `--access-level` and `--role` classify least-privilege policy intent and do not grant sudo, administrator, group, IAM, or root-equivalent privileges. Host controls enforce actual privileges. | README/wiki/test link: |
-| Prune semantics | `password prune` removes expired tracked grants only; active grants and unmanaged records are preserved; existing users explicitly allowed with `--allow-existing-user` are locked/expired but not deleted; root-equivalent users are never deleted from password-grant metadata or host-user markers. | Test or docs link: |
+| Prune semantics | `password prune` requires exactly one selector, `--all` or `--username USER`; it removes expired tracked grants only; active grants and unmanaged records are preserved; existing users explicitly allowed with `--allow-existing-user` are locked/expired but not deleted; root-equivalent users are never mutated from password-grant metadata or host-user markers. | Test or docs link: |
 | Host uninstall scope | `host uninstall` removes managed certificate host config by default; shared CA, wrapper, policy-user, and Unix-account removal are opt-in. Unix-account deletion requires the SSHFling host-user marker written by `host install --create-user`. | Docs link: |
 | Package uninstall scope | Package uninstall removes package files and managed repo entries, but not host SSH state, password grant state, CA material, `/etc/sshfling` config, dependency package state, or original host configuration. Dependency autoremove/autopurge is a separate fleet action. macOS package notes and Windows MSI metadata state this scope. | Docs or metadata link: |
 

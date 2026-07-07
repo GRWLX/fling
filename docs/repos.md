@@ -72,10 +72,11 @@ remove `/etc/sshfling` policy/config files or other host state. Do not add
 `apt autoremove`, `apt autopurge`, or `apt purge` to SSHFling uninstall runbooks
 unless fleet policy explicitly owns dependency and conffile cleanup.
 
-## Public RHEL / Fedora / Rocky / Alma RPM
+## Public RHEL / Fedora / Rocky / Alma / UBI RPM
 
 Publish the package site with repository signing enabled and use the signed
-Yum/DNF repo for production and fleet installs:
+Yum/DNF repo for production and fleet installs on RHEL-family hosts including
+Fedora, Rocky Linux, AlmaLinux, and UBI:
 
 ```bash
 APPROVED_REPO_FINGERPRINT="PASTE_APPROVED_RELEASE_FINGERPRINT"
@@ -221,7 +222,12 @@ $UninstallRoots = @(
   "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
 $Products = Get-ItemProperty -Path $UninstallRoots -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -eq "SSHFling" }
+  Where-Object {
+    $_.DisplayName -eq "SSHFling" -and
+    $_.Publisher -eq "SSHFling Maintainers" -and
+    $_.WindowsInstaller -eq 1 -and
+    $_.URLInfoAbout -eq "https://github.com/GRWLX/sshfling"
+  }
 foreach ($Product in $Products) {
   $ProductCode = $Product.PSChildName
   if ($ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {
@@ -286,10 +292,20 @@ the policy file before issuing temporary credentials.
 
 Package docs and release notes must preserve the current runtime contract:
 
-- Bare `sudo sshfling` creates a temporary password grant.
-- Certificate grants require `--certificate`; certificate-specific setup options fail without it.
+- Password mode is the default access type, but temporary grant creation
+  requires an explicit `-t/--time` lifetime such as `sudo sshfling -t 10m`.
+- Certificate grants require `--certificate`; certificate setup requires an
+  existing CA keypair from `sshfling ca init` and target host trust from
+  `sshfling host install`; certificate-specific setup options fail unless
+  `--certificate` is present.
 - Access levels are policy classifications for least-privilege review, not privilege assignment. `standard` is the default; `operator`, `sudo-limited`, and `admin`/root-equivalent must be explicitly approved in policy for the account receiving the grant.
-- `sshfling password prune` removes expired tracked password grants only. `--all` scans all tracked grants but leaves active grants in place, `--delete-users` only deletes expired SSHFling-created Unix users, existing users explicitly allowed with `--allow-existing-user` are locked and expired but never deleted, and root-equivalent users are never deleted from password-grant metadata or host-user markers.
+- `sshfling password prune` requires exactly one selector: `--all` to scan all
+  tracked grants or `--username USER` for a targeted cleanup. It removes
+  expired tracked password grants only. `--all` leaves active grants in place,
+  `--delete-users` only deletes expired SSHFling-created Unix users, existing
+  users explicitly allowed with `--allow-existing-user` are locked and expired
+  but never deleted, and root-equivalent users are never deleted from
+  password-grant metadata or host-user markers.
 - `sshfling host uninstall` removes managed certificate host SSH configuration by default. Shared CA, wrapper, policy-user, and Unix-account removal are opt-in flags; Unix-account deletion requires the SSHFling host-user marker written by `host install --create-user`.
 
 Package uninstall removes SSHFling-managed package files and repository entries
@@ -338,7 +354,7 @@ sudo apt install ./dist/sshfling_0.1.13_all.deb
 
 For client repo registration, sign the repo metadata with GPG, publish the public key, and use an APT source with `signed-by=`.
 
-## RHEL / Fedora / Rocky / Alma RPM
+## RHEL / Fedora / Rocky / Alma / UBI RPM
 
 Minimal local repo:
 

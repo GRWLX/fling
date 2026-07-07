@@ -77,18 +77,23 @@ policy_dir=/etc/sshfling
 policy_file=$policy_dir/policy.json
 default_policy=/usr/local/share/sshfling/defaults/policy.json
 
-if [ -e "$policy_dir" ] && [ ! -d "$policy_dir" ]; then
+if [ -L "$policy_dir" ] || { [ -e "$policy_dir" ] && [ ! -d "$policy_dir" ]; }; then
   echo "SSHFling policy path exists but is not a directory: $policy_dir" >&2
   exit 1
 fi
 
 install -d -m 0755 -o root -g wheel "$policy_dir" 2>/dev/null || install -d -m 0755 "$policy_dir"
-if [ ! -e "$policy_file" ]; then
+if [ -L "$policy_file" ]; then
+  echo "SSHFling policy file is a symlink; preserving operator-managed policy: $policy_file" >&2
+elif [ ! -e "$policy_file" ]; then
   install -m 0644 -o root -g wheel "$default_policy" "$policy_file" 2>/dev/null \
     || install -m 0644 "$default_policy" "$policy_file"
-elif [ -f "$policy_file" ] && [ ! -L "$policy_file" ]; then
+elif [ -f "$policy_file" ]; then
   chown root:wheel "$policy_file" 2>/dev/null || true
   chmod 0644 "$policy_file" 2>/dev/null || true
+else
+  echo "SSHFling policy path exists but is not a regular file: $policy_file" >&2
+  exit 1
 fi
 
 exit 0
