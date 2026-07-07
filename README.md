@@ -356,10 +356,11 @@ preinstall state. Do not include `apt autoremove`, `apt autopurge`,
 dependency cleanup is a separate reviewed fleet action. On DNF hosts, use
 `dnf --setopt=clean_requirements_on_remove=False remove sshfling` when removing
 only SSHFling. Linux packages store their own service-account install-state
-record under root-owned `/var/lib/sshfling/package-state` and remove that
-package state during uninstall/purge handling. Record original dependency and
-host configuration state in MDM, configuration management, or backups if exact
-revert is required.
+record under root-owned `/var/lib/sshfling/package-state`; normal
+uninstall/purge handling removes it, while identity-mismatch preservation can
+keep the record with the preserved service account for review. Record original
+dependency and host configuration state in MDM, configuration management, or
+backups if exact revert is required.
 
 The detailed cross-platform dependency policy is in
 [OpenSSH dependency policy](docs/openssh-dependencies.md).

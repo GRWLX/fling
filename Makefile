@@ -8,6 +8,7 @@ RELEASE_MANIFEST ?= $(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manife
 RELEASE_SECURITY_SCAN_FLAGS ?=
 RELEASE_SECURITY_LOCAL_OUTPUT_DIR ?= build/release-security-local
 RELEASE_MATRIX_VALIDATE_FLAGS ?=
+RELEASE_SCANNER_BIN_DIR ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP),$(CURDIR)/build)/release-scanners/bin
 
 .PHONY: install-local uninstall-local test test-containers test-release-security-scan release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-local release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg clean
 
@@ -51,16 +52,16 @@ release-assets-evidence:
 	python3 tools/generate_release_evidence.py --mode release-assets --artifacts-dir release-dist --version "$(VERSION)" --output-dir "$(RELEASE_EVIDENCE_OUTPUT_DIR)"
 
 release-security-scan:
-	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" $(RELEASE_SECURITY_SCAN_FLAGS)
+	PATH="$(RELEASE_SCANNER_BIN_DIR):$$PATH" python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" $(RELEASE_SECURITY_SCAN_FLAGS)
 
 release-security-scan-local:
 	$(MAKE) release-security-scan RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR="$(RELEASE_SECURITY_LOCAL_OUTPUT_DIR)" RELEASE_SECURITY_SCAN_FLAGS="$(RELEASE_SECURITY_SCAN_FLAGS) --allow-dirty"
 
 release-security-scan-optional:
-	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
+	PATH="$(RELEASE_SCANNER_BIN_DIR):$$PATH" python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
 
 release-security-scan-strict:
-	python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools --strict-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
+	PATH="$(RELEASE_SCANNER_BIN_DIR):$$PATH" python3 tools/release_security_scan.py --version "$(VERSION)" --output-dir "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)" --run-optional-tools --strict-optional-tools $(RELEASE_SECURITY_SCAN_FLAGS)
 
 release-security-evidence-validate:
 	python3 tools/release_matrix_validate.py --matrix "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-matrix.csv" --manifest "$(RELEASE_SECURITY_EVIDENCE_OUTPUT_DIR)/security-scan-manifest.json" $(RELEASE_MATRIX_VALIDATE_FLAGS)

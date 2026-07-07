@@ -106,7 +106,9 @@ matches the package-created account record. That record is limited to SSHFling
 service account state; it is not an OpenSSH or dependency inventory. The
 install-state record is kept under root-owned
 `/var/lib/sshfling/package-state`, not under the service-owned
-`/var/lib/sshflingd` runtime tree.
+`/var/lib/sshflingd` runtime tree. Normal uninstall cleanup removes that
+record; when a UID/GID/home mismatch causes the package-created service account
+to be preserved, the record can remain with the preserved account for review.
 
 Homebrew uninstall removes the formula's installed SSHFling files. It does not
 restore host OpenSSH or Python to an earlier state.

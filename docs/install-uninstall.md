@@ -102,9 +102,12 @@ SSH configuration, temporary grant state, or CA material.
 
 DEB maintainer scripts record only SSHFling package-created service account
 state under root-owned `/var/lib/sshfling/package-state`. Purge removes that
-package state and removes the package-created `sshflingd` user/group only when
-the record says they did not preexist and no SSHFling config/state directory
-remains.
+package state during normal cleanup and removes the package-created
+`sshflingd` user/group only when the record says they did not preexist, no
+SSHFling config/state directory remains, and the current UID/GID/home still
+matches the recorded package-created identity. If identity mismatch causes the
+package-created account to be preserved, the package-state record can remain
+with it for review.
 
 ## Linux RPM Package
 
@@ -152,7 +155,9 @@ sudo yum remove -y sshfling
 RPM scriptlets use root-owned `/var/lib/sshfling/package-state` for install
 state and `/var/lib/sshfling/rpm-preserve-config` only as a transient erase
 scratch area. They do not read lifecycle state from the service-owned
-`/var/lib/sshflingd` tree.
+`/var/lib/sshflingd` tree. Normal erase cleanup removes package state; identity
+mismatch preservation can keep the package-state record with the preserved
+service account for review.
 
 ## Public APT Repository
 
