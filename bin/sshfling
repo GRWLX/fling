@@ -463,6 +463,13 @@ def reject_symlink_component(path, action="manage"):
         )
 
 
+def chmod_open_file(fd, path, mode):
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, mode)
+    else:
+        Path(path).chmod(mode)
+
+
 def write_text_atomic(path, content, mode=0o600, action="write"):
     path = Path(path)
     reject_symlink_component(path, action)
@@ -473,7 +480,7 @@ def write_text_atomic(path, content, mode=0o600, action="write"):
     try:
         fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent), text=True)
         tmp_path = Path(tmp_name)
-        os.fchmod(fd, mode)
+        chmod_open_file(fd, tmp_path, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
             fd = None
             tmp_file.write(content)
@@ -502,7 +509,7 @@ def write_bytes_atomic(path, content, mode=0o600, action="write"):
     try:
         fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
         tmp_path = Path(tmp_name)
-        os.fchmod(fd, mode)
+        chmod_open_file(fd, tmp_path, mode)
         with os.fdopen(fd, "wb") as tmp_file:
             fd = None
             tmp_file.write(content)
