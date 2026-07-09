@@ -333,7 +333,8 @@ community manifests, and the current cross-OS validation workflow scope. Release
 tooling can generate artifact and package-site evidence matrices, but those
 matrices do not by themselves prove runtime support for every OS version,
 language/runtime version, CPU architecture, hardware class, ARM/IoT target, or
-FPGA/SoC host-control-plane claim. Large generated matrices under
+FPGA/SoC host-control-plane claim. Language/runtime claim rules are tracked in
+[language-support.md](language-support.md). Large generated matrices under
 `docs/release/enterprise-release-evidence/` are ignored and should be attached
 or linked from the release ticket rather than treated as tracked source.
 
@@ -521,4 +522,5 @@ Retain for each quarter:
 - Vulnerability-intake ownership and quarterly security-policy review need operational evidence in the release or compliance packet.
 - Broad OS, runtime, CPU architecture, hardware, ARM, IoT, or FPGA/SoC support
   claims require release-specific evidence; current artifact matrices and
-  workflow names are not enough by themselves.
+  workflow names are not enough by themselves. See
+  [language-support.md](language-support.md) for language/runtime claim rules.

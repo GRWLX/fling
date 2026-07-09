@@ -54,7 +54,8 @@ Use this checklist before publishing enterprise package artifacts.
 - List platform coverage precisely. Use exact OS versions, package formats,
   Python/OpenSSH versions where known, CPU architectures, hardware classes, and
   ARM/IoT/FPGA scope; do not summarize this as broad Linux, ARM, embedded, or
-  FPGA support unless the release evidence backs the claim.
+  FPGA support unless the release evidence backs the claim. See
+  [language-support.md](language-support.md) for language/runtime claim rules.
 - Include checksum location and the signing-key fingerprint used for APT/RPM metadata, or explicitly state when a generated test key was used.
 - Record validation workflow links for `Container image tests`, `Release packages without web`, `Release packages with public web`, `Package install tests`, and `Cross OS validation`.
 
@@ -204,7 +205,8 @@ Do not publish an enterprise release until these are fixed or formally excepted:
   community manifest list.
 - Docs, release notes, package metadata, or sales-facing copy claim broad OS,
   language, ARM, IoT, embedded, hardware appliance, or FPGA support without
-  release evidence or an approved exception.
+  release evidence or an approved exception. See
+  [language-support.md](language-support.md) for language/runtime claim rules.
 - Generated release evidence, matrices, package trees, or local scan outputs
   are staged for commit instead of remaining ignored artifacts linked from the
   release ticket.

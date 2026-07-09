@@ -58,7 +58,8 @@ These files are generated into the public package site. Some can be used directl
 
 The tables above describe artifacts and generated packaging metadata, not a
 blanket support claim for every OS, language runtime, CPU architecture, hardware
-class, or embedded target that can consume those files.
+class, or embedded target that can consume those files. Language/runtime claim
+rules are tracked in [language-support.md](language-support.md).
 
 Each enterprise release must keep a compact platform coverage declaration in
 the release evidence packet. Do not commit large generated OS-by-architecture

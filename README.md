@@ -584,6 +584,8 @@ Package-channel install and uninstall instructions are in
 The current OS/package target matrix is in [docs/build-targets.md](docs/build-targets.md).
 OpenSSH and runtime dependency ownership policy is in
 [docs/openssh-dependencies.md](docs/openssh-dependencies.md).
+Language/runtime support claim rules are in
+[docs/language-support.md](docs/language-support.md).
 Enterprise publishing guidance is in [docs/release-checklist.md](docs/release-checklist.md),
 [docs/release-evidence.md](docs/release-evidence.md),
 [docs/enterprise-readiness.md](docs/enterprise-readiness.md), and the
