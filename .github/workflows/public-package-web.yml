@@ -64,6 +64,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          cache-dependency-path: packaging/java/pom.xml
 
       - name: Validate sources
         run: make test
@@ -73,6 +74,7 @@ jobs:
           SSHFLING_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          export SSHFLING_MAVEN_REPO_LOCAL="$HOME/.m2/repository"
           ./packaging/build-deb.sh
           ./packaging/build-rpm.sh
           ./packaging/build-dotnet.sh

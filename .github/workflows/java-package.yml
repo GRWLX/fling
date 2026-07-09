@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      verify_published:
+        description: "Verify the Java Maven package can be downloaded from GitHub Packages without redeploying it."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -54,11 +59,12 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          cache-dependency-path: packaging/java/pom.xml
 
       - name: Build and validate executable JAR
         env:
           SSHFLING_VERSION: ${{ steps.version.outputs.version }}
-        run: make package-java VERSION="${SSHFLING_VERSION}"
+        run: SSHFLING_MAVEN_REPO_LOCAL="$HOME/.m2/repository" make package-java VERSION="${SSHFLING_VERSION}"
 
       - name: Upload Java package artifacts
         uses: actions/upload-artifact@v7
@@ -91,6 +97,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          cache-dependency-path: packaging/java/pom.xml
 
       - name: Deploy Maven package
         env:
@@ -99,4 +106,75 @@ jobs:
           SSHFLING_JAVA_REGISTRY_URL: https://maven.pkg.github.com/${{ github.repository }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./packaging/build-java.sh
+        run: SSHFLING_MAVEN_REPO_LOCAL="$HOME/.m2/repository" ./packaging/build-java.sh
+
+  verify-published:
+    name: Verify published Java package
+    if: >-
+      always() &&
+      needs.build.result == 'success' &&
+      (
+        (github.ref_type == 'tag' && needs.publish.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' && needs.publish.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.verify_published == 'true')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    needs:
+      - build
+      - publish
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download and validate published Maven package
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          REGISTRY_URL: https://maven.pkg.github.com/${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          verify_dir="$RUNNER_TEMP/sshfling-java-verify"
+          maven_repo="$verify_dir/m2"
+          settings_file="$verify_dir/settings.xml"
+          install -d "$verify_dir" "$maven_repo"
+          cat >"$settings_file" <<SETTINGS
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <servers>
+              <server>
+                <id>github</id>
+                <username>${GITHUB_ACTOR}</username>
+                <password>${GITHUB_TOKEN}</password>
+              </server>
+            </servers>
+          </settings>
+          SETTINGS
+          chmod 0600 "$settings_file"
+
+          mvn -B -s "$settings_file" -Dmaven.repo.local="$maven_repo" \
+            dependency:get \
+            -Dartifact="io.sshfling:sshfling-cli:${VERSION}" \
+            -DremoteRepositories="github::default::${REGISTRY_URL}" \
+            -Dtransitive=false
+          mvn -B -s "$settings_file" -Dmaven.repo.local="$maven_repo" \
+            dependency:get \
+            -Dartifact="io.sshfling:sshfling-cli:${VERSION}:jar:sources" \
+            -DremoteRepositories="github::default::${REGISTRY_URL}" \
+            -Dtransitive=false
+
+          artifact_dir="$maven_repo/io/sshfling/sshfling-cli/$VERSION"
+          test -f "$artifact_dir/sshfling-cli-$VERSION.jar"
+          test -f "$artifact_dir/sshfling-cli-$VERSION-sources.jar"
+          test -f "$artifact_dir/sshfling-cli-$VERSION.pom"
+          java -jar "$artifact_dir/sshfling-cli-$VERSION.jar" --version | grep -Fx "sshfling $VERSION"

@@ -21,7 +21,7 @@ fi
 dist_dir="$repo_root/dist"
 build_root="$repo_root/build/java"
 project_dir="$build_root/project"
-maven_repo="$build_root/m2"
+maven_repo="${SSHFLING_MAVEN_REPO_LOCAL:-$build_root/m2}"
 settings_file="${MAVEN_SETTINGS:-}"
 jar_path="$dist_dir/sshfling-cli-$version.jar"
 sources_jar_path="$dist_dir/sshfling-cli-$version-sources.jar"
