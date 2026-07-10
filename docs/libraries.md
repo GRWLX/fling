@@ -223,7 +223,7 @@ my $status = SSHFling::run('--version');
 
 ## Generated First-91 Library Surface Index
 
-This index contains 77 explicit library/module surfaces: 71 PASS and 6 BLOCKED. Source-archive publication rows are excluded because publication alone is not library runtime evidence.
+This index contains 78 explicit library/module surfaces: 72 PASS and 6 BLOCKED. Source-archive publication rows are excluded because publication alone is not library runtime evidence.
 
 | Order | Language | Package manager | Deployment | Interface | Status | Artifact | Evidence or blocker |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
@@ -295,6 +295,7 @@ This index contains 77 explicit library/module surfaces: 71 PASS and 6 BLOCKED. 
 | 70 | J | J package | J addon dependency and command | library + CLI | PASS | sshfling-j-VERSION.tar.gz | The per-language validator installs the deterministic archive as an isolated J addon and runs its external consumer. |
 | 71 | LabVIEW G | VIPM/LabVIEW project | System Exec VI integration | library VI + CLI adapter candidate | BLOCKED | none | BLOCKED runtime-validation: a licensed LabVIEW version/OS matrix and genuine VI package are required; no binary G source is fabricated |
 | 73 | Q/KDB+ | KX q package | q namespace package | library | BLOCKED | sshfling-q-VERSION.tar.gz | BLOCKED runtime-validation: source publication passes, but the q runtime is unavailable for package and consumer validation |
+| 74 | Hack | npm | server-side Hack adapter project | library consumer | PASS | sshfling-VERSION.tgz | HHVM 4.172 executes src/main.hack inside the hhvm/hhvm container with Node v22.23.1 after the Node bridge verifies the packed SSHFling npm API. |
 | 75 | CFML | npm | server-side CFML adapter project | library consumer | PASS | sshfling-VERSION.tgz | CommandBox executes the CFML template after the Node bridge verifies the packed SSHFling npm API. |
 | 76 | Wolfram Language | Wolfram Paclet | RunProcess-based Paclet candidate | library | BLOCKED | tracked Paclet source; publication disabled | BLOCKED runtime-validation: a licensed Wolfram kernel exposed through wolframscript is required for conformance |
 | 85 | Chapel | Mason | Chapel module and executable package | library + CLI | PASS | sshfling-chapel-VERSION.tar.gz | The systems-language validator extracts the deterministic archive, runs mason modules, compiles the package and external consumer with chpl, and executes both. |

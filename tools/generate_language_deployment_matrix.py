@@ -1916,6 +1916,17 @@ DEPLOYMENTS.append(
 )
 
 DEPLOYMENTS.append(
+    node_language_consumer(
+        "hack-npm-consumer",
+        "Hack",
+        "server-side Hack adapter project",
+        ["composer.json", ".hhconfig", "src/main.hack", "bridge.cjs", "test-bridge.cjs"],
+        "HHVM 4.172 executes src/main.hack inside the hhvm/hhvm container with Node v22.23.1 after the Node bridge verifies the packed SSHFling npm API.",
+        "The Hack entry point invokes a fixed Node bridge from a server-side HHVM process boundary.",
+    )
+)
+
+DEPLOYMENTS.append(
     validated_batch_package(
         "ballerina-package-library",
         "Ballerina",
@@ -2206,7 +2217,7 @@ FIRST_91_CATALOG: tuple[tuple[str, str], ...] = (
     ("LabVIEW G", "BLOCKED"),
     ("Scratch", "NOT_APPLICABLE"),
     ("Q/KDB+", "BLOCKED"),
-    ("Hack", "BLOCKED"),
+    ("Hack", "PASS"),
     ("CFML", "PASS"),
     ("Wolfram Language", "BLOCKED"),
     ("Verilog", "NOT_APPLICABLE"),
@@ -2657,6 +2668,7 @@ _PROMOTED_RUNTIME_SURFACES = {
     "odin-source-runtime",
     "pony-corral-runtime",
     "cfml-commandbox-runtime",
+    "hack-hhvm-runtime",
     "chapel-mason-runtime",
     "ballerina-package-runtime",
     "roc-package-runtime",

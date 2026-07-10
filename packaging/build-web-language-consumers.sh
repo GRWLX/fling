@@ -5,6 +5,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 consumer_root="$repo_root/packaging/node/consumers"
 node_cmd="${NODE:-node}"
 npm_cmd="${NPM:-npm}"
+hhvm_docker_image="${HHVM_DOCKER_IMAGE:-hhvm/hhvm:latest}"
+node_linux_x64_version="v22.23.1"
+node_linux_x64_sha256="9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578"
 
 all_consumers=(
   react
@@ -118,6 +121,57 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   )
 }
 
+node_linux_x64_root() {
+  local node_root="$work_root/node-$node_linux_x64_version-linux-x64"
+  local node_archive="$work_root/node-$node_linux_x64_version-linux-x64.tar.xz"
+  if [[ ! -x "$node_root/bin/node" ]]; then
+    curl --fail --location --retry 4 --retry-all-errors --silent --show-error \
+      "https://nodejs.org/dist/$node_linux_x64_version/node-$node_linux_x64_version-linux-x64.tar.xz" \
+      --output "$node_archive"
+    printf '%s  %s\n' "$node_linux_x64_sha256" "$node_archive" | sha256sum --check --status
+    rm -rf -- "$node_root"
+    install -d "$node_root"
+    tar -xJf "$node_archive" -C "$node_root" --strip-components=1
+  fi
+  printf '%s\n' "$node_root"
+}
+
+run_hack_in_hhvm_container() {
+  local app_dir="$1"
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Hack validation is GATED: neither 'hhvm' nor Docker is available." >&2
+    return 42
+  fi
+
+  local node_root
+  node_root="$(node_linux_x64_root)"
+  local container_id
+  container_id="$(docker create --entrypoint sleep "$hhvm_docker_image" 600)"
+  local result=0
+
+  docker start "$container_id" >/dev/null || result=$?
+  if ((result == 0)); then
+    docker exec "$container_id" mkdir -p /workspace/app /opt/node >/dev/null || result=$?
+  fi
+  if ((result == 0)); then
+    docker cp "$app_dir/." "$container_id:/workspace/app" >/dev/null || result=$?
+  fi
+  if ((result == 0)); then
+    docker cp "$node_root/." "$container_id:/opt/node" >/dev/null || result=$?
+  fi
+  if ((result == 0)); then
+    docker exec -w /workspace/app -e NODE=/opt/node/bin/node \
+      "$container_id" /opt/node/bin/node test-bridge.cjs || result=$?
+  fi
+  if ((result == 0)); then
+    docker exec -w /workspace/app -e NODE=/opt/node/bin/node \
+      "$container_id" hhvm src/main.hack || result=$?
+  fi
+
+  docker rm -f "$container_id" >/dev/null 2>&1 || true
+  return "$result"
+}
+
 validate_consumer() (
   set -e
   local consumer="$1"
@@ -148,11 +202,11 @@ validate_consumer() (
       ;;
     hack)
       "$npm_cmd" run test:node
-      if ! command -v hhvm >/dev/null 2>&1; then
-        echo "Hack validation is GATED: the 'hhvm' toolchain is not installed." >&2
-        exit 42
+      if command -v hhvm >/dev/null 2>&1; then
+        "$npm_cmd" run test:hack
+      else
+        run_hack_in_hhvm_container "$app_dir"
       fi
-      "$npm_cmd" run test:hack
       ;;
     *)
       "$npm_cmd" test

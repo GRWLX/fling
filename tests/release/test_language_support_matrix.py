@@ -256,16 +256,11 @@ class LanguageSupportMatrixTests(unittest.TestCase):
             "HTML/CSS": "packaging/node/consumers/html-css/src/styles.css",
             "Dart": "packaging/node/consumers/dart/bin/sshfling_consumer.dart",
             "CFML": "packaging/node/consumers/cfml/test.cfm",
-        }
-        blocked_sources = {
             "Hack": "packaging/node/consumers/hack/src/main.hack",
         }
 
         for language, source_path in pass_sources.items():
             self.assertEqual(status_value(rows_by_language[language]).upper(), "PASS")
-            self.assertTrue((REPO_ROOT / source_path).is_file(), source_path)
-        for language, source_path in blocked_sources.items():
-            self.assertEqual(status_value(rows_by_language[language]).upper(), "BLOCKED")
             self.assertTrue((REPO_ROOT / source_path).is_file(), source_path)
 
     def test_scripting_language_packages_are_supported_or_gated(self) -> None:

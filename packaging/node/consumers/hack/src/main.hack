@@ -1,5 +1,3 @@
-<?hh
-
 <<__EntryPoint>>
 function main(): void {
   // HHVM launches this bridge on the server; no browser runtime is involved.

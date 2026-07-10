@@ -134,6 +134,7 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             "Chapel",
             "Ballerina",
             "Roc",
+            "Hack",
         ):
             cells = by_language[language]
             self.assertEqual(matrix.derived_catalog_status(cells), "PASS", language)
@@ -201,6 +202,7 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             "Svelte",
             "Angular",
             "HTML/CSS",
+            "Hack",
             "Tcl",
             "AWK",
             "Lua",
@@ -262,6 +264,7 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             "rescript",
             "html-css",
             "cfml",
+            "hack",
         ):
             item = deployments[f"{consumer}-npm-consumer"]
             self.assertEqual(item["build_target"], "package-web-language-consumers")

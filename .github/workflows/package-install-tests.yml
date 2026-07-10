@@ -916,7 +916,7 @@ jobs:
           )
           SSHFLING_NPM_PACKAGE="$tmp/sshfling-${version}.tgz" \
             bash packaging/build-web-language-consumers.sh \
-              react vue svelte angular elm purescript rescript html-css cfml
+              react vue svelte angular elm purescript rescript html-css cfml hack
           npm uninstall --prefix "$tmp/app" sshfling >/dev/null
           test ! -e "$tmp/app/node_modules/.bin/sshfling"
 

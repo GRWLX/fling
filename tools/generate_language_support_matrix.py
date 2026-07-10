@@ -106,6 +106,12 @@ PASS_CFML_EVIDENCE = (
     "bash packaging/build-web-language-consumers.sh cfml; CommandBox 6.3.3 executes the "
     "CFML template after the Node bridge validates the packed SSHFling API"
 )
+PASS_HACK_EVIDENCE = (
+    "make package-node VERSION=0.1.16; SSHFLING_NPM_PACKAGE=dist/sshfling-0.1.16.tgz "
+    "bash packaging/build-web-language-consumers.sh hack; HHVM 4.172 executes the Hack "
+    "adapter inside the hhvm/hhvm container with Node v22.23.1 after the Node bridge "
+    "validates the packed SSHFling API"
+)
 BLOCKED_WEB_TOOLCHAIN_EVIDENCE = (
     "tracked package/source and a passing SSHFling Node bridge exist under packaging/node/consumers, "
     "but the required external language runtime is unavailable on the validation host"
@@ -509,10 +515,10 @@ LANGUAGE_SUPPORT: list[dict[str, str]] = [
     row("Q/KDB+", "BLOCKED", "Q/KDB+ package/build metadata are tracked under packaging/scientific-languages/q.", BLOCKED_TOOLCHAIN_EVIDENCE, "Q validation is blocked until q runtime/toolchain is available."),
     row(
         "Hack",
-        "BLOCKED",
-        "Hack source, Composer metadata, and a validated Node bridge are tracked under packaging/node/consumers/hack.",
-        BLOCKED_WEB_TOOLCHAIN_EVIDENCE,
-        "Promotion requires HHVM execution; the batch validator fails closed while hhvm is unavailable.",
+        "PASS",
+        "Hack source, Composer metadata, HHVM container fallback, and a validated Node bridge are tracked under packaging/node/consumers/hack.",
+        PASS_HACK_EVIDENCE,
+        "HHVM executes the server-side Hack adapter, which delegates to a trusted Node bridge consuming the packed SSHFling npm library.",
     ),
     row(
         "CFML",
