@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "SSHFlingConsumer",
     dependencies: [
-        .package(path: "../install"),
+        .package(name: "SSHFling", path: "../install"),
     ],
     targets: [
         .executableTarget(

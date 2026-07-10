@@ -473,6 +473,11 @@ detect_language() {
       ;;
     red)
       command -v red >/dev/null 2>&1 || { GATE_REASON="the Red compiler is required"; return 1; }
+      if ! red -r -o "$probe_dir/probe" "${package_roots[red]}/src/main.reds" \
+          >/dev/null 2>&1; then
+        GATE_REASON="the red command is not a compatible Red/System compiler"
+        return 1
+      fi
       ;;
     swift)
       command -v swift >/dev/null 2>&1 || { GATE_REASON="SwiftPM (swift) is required"; return 1; }

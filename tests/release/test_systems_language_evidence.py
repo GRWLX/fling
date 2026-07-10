@@ -224,6 +224,32 @@ def run_validator(
 
 
 class SystemsLanguageEvidenceTests(unittest.TestCase):
+    def test_red_command_name_requires_a_compiler_probe(self) -> None:
+        fake_restricted_ed = "#!/usr/bin/env sh\nexit 64\n"
+        with validator_fixture() as repo:
+            completed = run_validator(
+                repo,
+                "red",
+                {"gcc": FAKE_COMPILER, "red": fake_restricted_ed},
+            )
+            rows = read_evidence(repo)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        runtime = next(
+            row for row in rows if row["subject"] == "red" and row["phase"] == "runtime-validation"
+        )
+        self.assertEqual(runtime["status"], "BLOCKED")
+        self.assertIn("not a compatible Red/System compiler", runtime["detail"])
+        self.assertNotIn("RUNTIME\tred\tFAIL", completed.stdout)
+
+    def test_swift_consumer_uses_a_stable_local_package_name(self) -> None:
+        manifest = (
+            REPO_ROOT
+            / "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Package.swift"
+        ).read_text(encoding="utf-8")
+        self.assertIn('.package(name: "SSHFling", path: "../install")', manifest)
+        self.assertIn('.product(name: "SSHFling", package: "SSHFling")', manifest)
+
     def test_only_archive_lifecycle_builders_declare_lifecycle_capabilities(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         modes = parse_array(source, "validation_modes")
