@@ -5,7 +5,7 @@
   "description": "Dart server process invoking a Node bridge to the SSHFling npm API.",
   "scripts": {
     "test:node": "node test-bridge.cjs",
-    "test:dart": "dart pub get --offline && dart compile exe bin/sshfling_consumer.dart -o bin/sshfling-dart-consumer && ./bin/sshfling-dart-consumer",
+    "test:dart": "dart pub get --offline && dart format --output=none --set-exit-if-changed bin && dart analyze && dart compile exe bin/sshfling_consumer.dart -o bin/sshfling-dart-consumer && ./bin/sshfling-dart-consumer",
     "test": "npm run test:node && npm run test:dart"
   },
   "dependencies": {

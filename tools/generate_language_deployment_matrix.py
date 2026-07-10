@@ -1646,30 +1646,6 @@ DEPLOYMENTS.append(
 DEPLOYMENTS.extend(
     [
         validated_batch_package(
-            "swift-swiftpm-library",
-            "Swift",
-            "SwiftPM",
-            "Swift package dependency and executable",
-            "library + CLI",
-            "sshfling-swift-VERSION.tar.gz",
-            "package-systems-languages",
-            "packaging/systems-languages/swift",
-            [
-                "packaging/systems-languages/swift/Package.swift",
-                "packaging/systems-languages/swift/Sources/SSHFling/SSHFling.swift",
-                "packaging/systems-languages/swift/Sources/sshfling/main.swift",
-                "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Package.swift",
-                "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Sources/SSHFlingConsumer/main.swift",
-                "packaging/build-systems-languages.sh",
-            ],
-            "Package.swift declares the Swift library and executable products while the external consumer uses an explicit local package dependency.",
-            "The systems validator extracts the deterministic archive, builds the package and external consumer with SwiftPM, and executes both.",
-            "The versioned archive contains the SwiftPM manifest, library, executable, consumer project, canonical runtime, templates, and inventory manifest.",
-            "A separate SwiftPM project imports the extracted SSHFling product without repository-wide package paths.",
-            "The Swift library exposes argument-array execution and the package provides a matching executable command.",
-            "The consumer and CLI validate version, init, invalid option, missing runtime, archive installation, removal, and import absence.",
-        ),
-        validated_batch_package(
             "julia-pkg-library",
             "Julia",
             "Julia Pkg",
@@ -1851,8 +1827,8 @@ _dart_deployment = deployment(
     ],
     (
         "The typed Dart adapter and explicit trusted Node bridge are tracked under packaging/node/consumers/dart.",
-        "pubspec.yaml declares Dart 3 compatibility while package.json pins the packed npm dependency and compile/test commands.",
-        "The web-language batch performs offline pub resolution and dart compile exe after installing only the packed SSHFling npm artifact.",
+        "pubspec.yaml declares Dart 3 compatibility while package.json pins the packed npm dependency and formatting, analysis, compile, and test commands.",
+        "The web-language batch performs dart format, dart analyze, offline pub resolution, and dart compile exe after installing only the packed SSHFling npm artifact.",
         "Validation requires the native sshfling-dart-consumer executable and the installed sshfling-VERSION.tgz dependency.",
         "The batch copies the Dart project to a temporary directory, installs the packed dependency, compiles, and executes the native adapter.",
         "The server-side executable launches a fixed Node bridge, which imports sshfling, invokes run, and checks templateDir.",
@@ -1861,9 +1837,47 @@ _dart_deployment = deployment(
     ),
 )
 _dart_deployment["validation_evidence"] = (
-    "Dart SDK 3.12.2 completes npm run test:dart and the batch reports [PASS] dart."
+    "Dart SDK 3.12.2 completes formatting, analysis, offline resolution, native compilation, "
+    "and npm run test:dart; the batch reports [PASS] dart."
 )
 DEPLOYMENTS.append(_dart_deployment)
+
+_swift_deployment = validated_batch_package(
+    "swift-swiftpm-library",
+    "Swift",
+    "SwiftPM",
+    "Swift package dependency and executable",
+    "library + CLI",
+    "sshfling-swift-VERSION.tar.gz",
+    "package-systems-languages",
+    "packaging/systems-languages/swift",
+    [
+        "packaging/systems-languages/swift/Package.swift",
+        "packaging/systems-languages/swift/Sources/SSHFling/SSHFling.swift",
+        "packaging/systems-languages/swift/Sources/sshfling/main.swift",
+        "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Package.swift",
+        "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Sources/SSHFlingConsumer/main.swift",
+        "packaging/build-systems-languages.sh",
+        "tools/validate_promoted_language_evidence.py",
+        ".github/workflows/language-runtime-validation.yml",
+    ],
+    "Package.swift declares the Swift library and executable products while the external consumer uses an explicit local-path package dependency.",
+    "The Ubuntu 24.04 strict systems validator extracts the deterministic archive, builds the package and external consumer with SwiftPM, and executes both.",
+    "The versioned archive contains the SwiftPM manifest, library, executable, consumer project, canonical runtime, templates, and inventory manifest.",
+    "A separate SwiftPM project imports the extracted SSHFling product without repository-wide package paths.",
+    "The Swift library exposes argument-array execution and the package provides a matching executable command.",
+    "The consumer and CLI validate version, init, invalid option, missing runtime, source archive extraction, removal, and import absence.",
+)
+_swift_evidence = _swift_deployment["evidence"]
+assert isinstance(_swift_evidence, dict)
+_swift_evidence["version"] = (
+    "The hosted SwiftPM consumer and packaged command each report the exact release output sshfling VERSION."
+)
+_swift_deployment["validation_evidence"] = (
+    "The Ubuntu 24.04 strict catalog records RUNTIME swift PASS with archive-lifecycle "
+    "mode and the complete SwiftPM library, CLI, removal, and post-removal capability set."
+)
+DEPLOYMENTS.append(_swift_deployment)
 
 
 FIRST_91_CATALOG: tuple[tuple[str, str], ...] = (
@@ -2142,16 +2156,6 @@ def not_applicable_surface(
 CATALOG_SURFACES.extend(
     [
         blocked_runtime(
-            "swift-swiftpm-runtime",
-            "Swift",
-            "SwiftPM",
-            "Swift package dependency and executable",
-            "library + CLI",
-            "sshfling-swift-VERSION.tar.gz",
-            "the SwiftPM source archive is publishable, but swift and swiftc runtime validation is unavailable on the validation host",
-            ["packaging/systems-languages/swift/Package.swift", "packaging/build-systems-languages.sh"],
-        ),
-        blocked_runtime(
             "dart-pub-runtime",
             "Dart",
             "pub",
@@ -2411,7 +2415,6 @@ CATALOG_SURFACES.extend(
 )
 
 _PROMOTED_RUNTIME_SURFACES = {
-    "swift-swiftpm-runtime",
     "dart-pub-runtime",
     "julia-pkg-runtime",
     "janet-jpm-runtime",

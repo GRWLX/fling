@@ -98,8 +98,8 @@ PASS_WEB_CONSUMER_EVIDENCE = (
 )
 PASS_DART_EVIDENCE = (
     "make package-dart-consumer VERSION=0.1.16; Dart SDK 3.12.2 resolves the packed npm "
-    "library offline, compiles the typed adapter to a native executable, and validates the "
-    "trusted Node bridge execution"
+    "library offline, enforces dart format and dart analyze, compiles the typed adapter to a "
+    "native executable, and validates the trusted Node bridge execution"
 )
 BLOCKED_WEB_TOOLCHAIN_EVIDENCE = (
     "tracked package/source and a passing SSHFling Node bridge exist under packaging/node/consumers, "
@@ -111,6 +111,13 @@ PASS_FUNCTIONAL_LANGUAGES_EVIDENCE = (
 )
 PASS_SYSTEM_LANGUAGES_EVIDENCE = (
     "bash packaging/build-systems-languages.sh --allow-blocked; "
+    "dist/sshfling-systems-languages-0.1.16-validation.tsv"
+)
+PASS_SWIFT_EVIDENCE = (
+    "GitHub Actions Language runtime validation run "
+    "https://github.com/GRWLX/sshfling/actions/runs/29072584483 on commit "
+    "8b52008f49d3d256cee5d3c0fbfed2b9d1fa5607; the ubuntu-24.04 strict catalog "
+    "records RUNTIME swift PASS and exact SwiftPM archive-lifecycle evidence in "
     "dist/sshfling-systems-languages-0.1.16-validation.tsv"
 )
 BLOCKED_TOOLCHAIN_EVIDENCE = (
@@ -326,8 +333,8 @@ LANGUAGE_SUPPORT: list[dict[str, str]] = [
         "Swift",
         "PASS",
         "SwiftPM package metadata, library sources, executable, and external consumer are tracked under packaging/systems-languages/swift.",
-        PASS_SYSTEM_LANGUAGES_EVIDENCE,
-        "Hosted Swift validation builds and installs the versioned archive, executes the library consumer and CLI workflows, and verifies removal in an isolated tree.",
+        PASS_SWIFT_EVIDENCE,
+        "Ubuntu 24.04 hosted validation extracts the versioned source archive into an isolated prefix, executes the local-path SwiftPM consumer and CLI workflows, and verifies removal.",
     ),
     row(
         "R",
@@ -348,7 +355,7 @@ LANGUAGE_SUPPORT: list[dict[str, str]] = [
         "PASS",
         "A Dart 3 pub project and typed launcher compile to a native server executable that consumes the packed SSHFling npm library through an explicit trusted Node bridge.",
         PASS_DART_EVIDENCE,
-        "Dart SDK 3.12.2 completes offline dependency resolution, native compilation, and the packaged SSHFling runtime workflow.",
+        "Dart SDK 3.12.2 completes formatting, analysis, offline dependency resolution, native compilation, and the packaged SSHFling runtime workflow.",
     ),
     row(
         "Lua",

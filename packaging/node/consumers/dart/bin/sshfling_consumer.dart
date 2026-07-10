@@ -8,7 +8,12 @@ Future<void> main() async {
   final process = await Process.run(node, [bridge]);
 
   if (process.exitCode != 0) {
-    throw ProcessException(node, [bridge], process.stderr.toString(), process.exitCode);
+    throw ProcessException(
+      node,
+      [bridge],
+      process.stderr.toString(),
+      process.exitCode,
+    );
   }
 
   final result = jsonDecode(process.stdout.toString());

@@ -31,6 +31,13 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
     def test_matrix_validation_accepts_current_surfaces(self) -> None:
         self.assertEqual(matrix.validate_matrix(), [])
 
+    def test_new_deployments_append_without_renumbering_existing_cells(self) -> None:
+        ids = [str(item["id"]) for item in matrix.DEPLOYMENTS]
+
+        self.assertEqual(ids[73], "julia-pkg-library")
+        self.assertEqual(ids[80], "dart-native-cli-consumer")
+        self.assertEqual(ids[81], "swift-swiftpm-library")
+
     def test_first_91_catalog_has_complete_explicit_coverage(self) -> None:
         cells = matrix.catalog_cells()
         expected = list(matrix.FIRST_91_CATALOG)
@@ -260,6 +267,8 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
         self.assertEqual(dart["build_target"], "package-web-language-consumers")
         self.assertEqual(dart["interface_type"], "native CLI consumer")
         self.assertIn("dart compile exe", dart["evidence"]["build"])
+        self.assertIn("dart format", dart["evidence"]["build"])
+        self.assertIn("dart analyze", dart["evidence"]["build"])
         self.assertIn("packaging/node/consumers/dart", str(dart["required_paths"]))
         self.assertIn("dart", workflow)
         self.assertIn("package-web-language-consumers:", makefile)

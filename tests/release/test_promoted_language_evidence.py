@@ -76,6 +76,8 @@ class PromotedLanguageEvidenceTests(unittest.TestCase):
         self,
         path: Path,
         blocked: tuple[str, str] | None = None,
+        missing: tuple[str, str] | None = None,
+        incomplete_capabilities: str | None = None,
         contradictory_zig: bool = False,
     ) -> None:
         with path.open("w", encoding="utf-8", newline="") as stream:
@@ -84,12 +86,33 @@ class PromotedLanguageEvidenceTests(unittest.TestCase):
             writer.writerow(["RESULT", "batch", "source-version", "PASS", "version=0.1.16"])
             for language in validator.SYSTEM_LANGUAGES:
                 for phase in validator.SYSTEM_LIFECYCLE_PHASES:
+                    if missing == (language, phase):
+                        continue
                     status = "BLOCKED" if blocked == (language, phase) else "PASS"
-                    detail = (
-                        "output=sshfling 0.1.16"
-                        if phase in {"isolated-consumer", "cli-version"}
-                        else "checked=yes"
-                    )
+                    detail = "checked=yes"
+                    if phase == "source-archive":
+                        detail = (
+                            f"artifact=sshfling-{language}-0.1.16.tar.gz;"
+                            f"sha256={'a' * 64};files=39;inventory_sha256={'b' * 64};"
+                            "repeat_build=identical"
+                        )
+                    elif phase == "install":
+                        detail = "isolated_prefix=/tmp/install;source_archive_extracted=yes"
+                    elif phase in {"isolated-consumer", "cli-version"}:
+                        detail = "output=sshfling 0.1.16"
+                        if language == "swift" and phase == "isolated-consumer":
+                            detail = (
+                                "swiftpm_local_dependency=yes;package_version=0.1.16;"
+                                "runtime_version=0.1.16;output=sshfling 0.1.16"
+                            )
+                    elif phase == "runtime-validation":
+                        capabilities = validator.SYSTEM_LIFECYCLE_CAPABILITIES[language]
+                        if incomplete_capabilities == language:
+                            capabilities = capabilities[:-1]
+                        detail = (
+                            "builder_exit=0;mode=archive-lifecycle;capabilities="
+                            + ",".join(capabilities)
+                        )
                     writer.writerow(["RESULT", language, phase, status, detail])
             for language in validator.SYSTEM_BUILD_LANGUAGES:
                 for phase in (
@@ -138,6 +161,37 @@ class PromotedLanguageEvidenceTests(unittest.TestCase):
             self.write_systems(systems, blocked=("v", "uninstall"))
             errors = validator.validate(functional, systems, "0.1.16")
             self.assertTrue(any("v: uninstall is not PASS" == error for error in errors))
+
+    def test_rejects_missing_swift_lifecycle_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            functional = root / "functional.tsv"
+            systems = root / "systems.tsv"
+            self.write_functional(functional)
+            self.write_systems(systems, missing=("swift", "uninstall-import"))
+            errors = validator.validate(functional, systems, "0.1.16")
+            self.assertIn("swift: uninstall-import is not PASS", errors)
+
+    def test_rejects_blocked_swift_lifecycle_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            functional = root / "functional.tsv"
+            systems = root / "systems.tsv"
+            self.write_functional(functional)
+            self.write_systems(systems, blocked=("swift", "isolated-consumer"))
+            errors = validator.validate(functional, systems, "0.1.16")
+            self.assertIn("swift: isolated-consumer is not PASS", errors)
+            self.assertIn("swift: contradictory systems failure evidence", errors)
+
+    def test_rejects_incomplete_swift_runtime_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            functional = root / "functional.tsv"
+            systems = root / "systems.tsv"
+            self.write_functional(functional)
+            self.write_systems(systems, incomplete_capabilities="swift")
+            errors = validator.validate(functional, systems, "0.1.16")
+            self.assertIn("swift: runtime capability evidence is incomplete", errors)
 
     def test_rejects_evidence_for_a_different_version(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

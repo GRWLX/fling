@@ -244,7 +244,7 @@ This index contains 76 explicit library/module surfaces: 65 PASS and 11 BLOCKED.
 | 14 | PowerShell | PowerShell module archive | versioned module package | library + CLI | PASS | sshfling-powershell-VERSION.tar.gz | The package-scripting-languages validator supplies the detailed PASS evidence below. |
 | 15 | Kotlin | Maven | Kotlin/JVM dependency | library | PASS | io.sshfling:sshfling-cli:VERSION | The package-java validator supplies the detailed PASS evidence below. |
 | 15 | Kotlin | Gradle | Kotlin/JVM dependency | library | PASS | io.sshfling:sshfling-cli:VERSION | The package-java validator supplies the detailed PASS evidence below. |
-| 16 | Swift | SwiftPM | Swift package dependency and executable | library + CLI | PASS | sshfling-swift-VERSION.tar.gz | The systems validator extracts the deterministic archive, builds the package and external consumer with SwiftPM, and executes both. |
+| 16 | Swift | SwiftPM | Swift package dependency and executable | library + CLI | PASS | sshfling-swift-VERSION.tar.gz | The Ubuntu 24.04 strict catalog records RUNTIME swift PASS with archive-lifecycle mode and the complete SwiftPM library, CLI, removal, and post-removal capability set. |
 | 17 | R | R CMD | R source package dependency | library | PASS | sshfling_VERSION.tar.gz | The per-language validator runs R CMD build, R CMD check, and R CMD INSTALL at VERSION=0.1.16. |
 | 18 | Ruby | RubyGems | gem dependency and executable | library + CLI | PASS | sshfling-VERSION.gem | The package-ruby validator supplies the detailed PASS evidence below. |
 | 18 | Ruby | Bundler | bundled application dependency | library + CLI | PASS | sshfling-VERSION.gem / source path | The package-ruby validator supplies the detailed PASS evidence below. |

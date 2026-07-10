@@ -126,6 +126,19 @@ class LanguageSupportMatrixTests(unittest.TestCase):
 
         self.assertEqual(status_value(rows_by_language["PowerShell"]).upper(), "PASS")
 
+    def test_swift_package_is_supported_by_strict_hosted_evidence(self) -> None:
+        rows_by_language = {
+            language_name(row): row for row in generate_language_support_matrix.LANGUAGE_SUPPORT
+        }
+        swift = rows_by_language["Swift"]
+
+        self.assertEqual(status_value(swift).upper(), "PASS")
+        evidence = str(evidence_value(swift))
+        self.assertIn("29072584483", evidence)
+        self.assertIn("ubuntu-24.04", evidence)
+        self.assertIn("RUNTIME swift PASS", evidence)
+        self.assertIn("archive-lifecycle", evidence)
+
     def test_javascript_typescript_package_surface_is_supported(self) -> None:
         rows_by_language = {
             language_name(row): row for row in generate_language_support_matrix.LANGUAGE_SUPPORT

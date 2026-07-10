@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from pathlib import Path
 
 
 FUNCTIONAL_LANGUAGES = ("julia", "j", "janet")
-SYSTEM_LANGUAGES = ("v", "webassembly-wasi", "odin", "pony")
+SYSTEM_LANGUAGES = ("v", "webassembly-wasi", "odin", "pony", "swift")
 SYSTEM_BUILD_LANGUAGES = ("zig",)
 SYSTEM_LIFECYCLE_PHASES = (
     "source-archive",
@@ -23,6 +24,66 @@ SYSTEM_LIFECYCLE_PHASES = (
     "uninstall-import",
     "runtime-validation",
 )
+SYSTEM_LIFECYCLE_CAPABILITIES = {
+    "v": (
+        "compile",
+        "library-consumer",
+        "cli-runtime",
+        "init-workflow",
+        "exit-workflow",
+        "archive-install",
+        "isolated-consumer",
+        "remove",
+        "post-removal-import-failure",
+    ),
+    "webassembly-wasi": (
+        "compile",
+        "library-build",
+        "library-consumer",
+        "cli-runtime",
+        "init-workflow",
+        "exit-workflow",
+        "archive-install",
+        "isolated-consumer",
+        "remove",
+        "post-removal-import-failure",
+    ),
+    "odin": (
+        "compile",
+        "library-build",
+        "library-consumer",
+        "cli-runtime",
+        "init-workflow",
+        "exit-workflow",
+        "archive-install",
+        "isolated-consumer",
+        "remove",
+        "post-removal-import-failure",
+    ),
+    "pony": (
+        "compile",
+        "library-build",
+        "library-consumer",
+        "cli-runtime",
+        "init-workflow",
+        "exit-workflow",
+        "archive-install",
+        "isolated-consumer",
+        "remove",
+        "post-removal-import-failure",
+    ),
+    "swift": (
+        "compile",
+        "library-consumer",
+        "cli-runtime",
+        "init-workflow",
+        "exit-workflow",
+        "archive-install",
+        "isolated-consumer",
+        "remove",
+        "post-removal-import-failure",
+    ),
+}
 
 
 def read_functional(path: Path) -> list[dict[str, str]]:
@@ -112,15 +173,50 @@ def validate(functional_path: Path, systems_path: Path, version: str) -> list[st
 
     for language in SYSTEM_LANGUAGES:
         selected = [row for row in systems if row.get("subject") == language]
-        by_phase = {row.get("phase"): row.get("status") for row in selected}
-        details = {row.get("phase"): row.get("detail", "") for row in selected}
+        by_phase: dict[str, dict[str, str]] = {}
         for phase in SYSTEM_LIFECYCLE_PHASES:
-            if by_phase.get(phase) != "PASS":
+            phase_rows = [row for row in selected if row.get("phase") == phase]
+            if len(phase_rows) != 1 or phase_rows[0].get("status") != "PASS":
                 errors.append(f"{language}: {phase} is not PASS")
+            elif len(phase_rows) == 1:
+                by_phase[phase] = phase_rows[0]
         for phase in ("isolated-consumer", "cli-version"):
-            output = detail_fields(details.get(phase, "")).get("output")
+            output = detail_fields(by_phase.get(phase, {}).get("detail", "")).get("output")
             if output != f"sshfling {version}":
                 errors.append(f"{language}: {phase} output is not sshfling {version}")
+
+        archive = detail_fields(by_phase.get("source-archive", {}).get("detail", ""))
+        if archive.get("artifact") != f"sshfling-{language}-{version}.tar.gz":
+            errors.append(f"{language}: source archive is not version {version}")
+        if archive.get("repeat_build") != "identical":
+            errors.append(f"{language}: source archive is not reproducible")
+        if not archive.get("files", "").isdigit() or int(archive["files"]) < 1:
+            errors.append(f"{language}: source archive has no file inventory")
+        for digest in ("sha256", "inventory_sha256"):
+            if not re.fullmatch(r"[0-9a-f]{64}", archive.get(digest, "")):
+                errors.append(f"{language}: source archive lacks a valid {digest}")
+
+        install = detail_fields(by_phase.get("install", {}).get("detail", ""))
+        if install.get("source_archive_extracted") != "yes":
+            errors.append(f"{language}: install does not extract the source archive")
+
+        runtime = detail_fields(by_phase.get("runtime-validation", {}).get("detail", ""))
+        if runtime.get("builder_exit") != "0" or runtime.get("mode") != "archive-lifecycle":
+            errors.append(f"{language}: runtime evidence is not a successful archive lifecycle")
+        capabilities = tuple(filter(None, runtime.get("capabilities", "").split(",")))
+        if capabilities != SYSTEM_LIFECYCLE_CAPABILITIES[language]:
+            errors.append(f"{language}: runtime capability evidence is incomplete")
+
+        if language == "swift":
+            consumer = detail_fields(
+                by_phase.get("isolated-consumer", {}).get("detail", "")
+            )
+            if (
+                consumer.get("swiftpm_local_dependency") != "yes"
+                or consumer.get("package_version") != version
+                or consumer.get("runtime_version") != version
+            ):
+                errors.append("swift: isolated consumer lacks versioned SwiftPM evidence")
         if any(row.get("status") in {"FAIL", "BLOCKED", "INCOMPLETE"} for row in selected):
             errors.append(f"{language}: contradictory systems failure evidence")
 
