@@ -58,11 +58,12 @@ test:
 	docker compose -f compose.client.yml config >/dev/null
 
 test-native:
-	bash -n native/sshfling-linux-account production/sshfling-session tests/cross-os/validate-native-linux-account.sh tests/cross-os/validate-native-unix-identity.sh tests/cross-os/validate-native-login-shell.sh tests/cross-os/validate-native-session-policy.sh
+	bash -n native/sshfling-linux-account native/sshfling-native-prune production/sshfling-session tests/cross-os/validate-native-linux-account.sh tests/cross-os/validate-native-unix-identity.sh tests/cross-os/validate-native-login-shell.sh tests/cross-os/validate-native-prune.sh tests/cross-os/validate-native-session-policy.sh
 	sh -n native/sshfling-unix-identity production/sshfling-login-shell
 	bash tests/cross-os/validate-native-linux-account.sh
 	bash tests/cross-os/validate-native-unix-identity.sh
 	bash tests/cross-os/validate-native-login-shell.sh
+	bash tests/cross-os/validate-native-prune.sh
 	bash tests/cross-os/validate-native-session-policy.sh
 
 test-containers:

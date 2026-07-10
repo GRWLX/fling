@@ -6,6 +6,8 @@ import io
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -94,6 +96,154 @@ class SSHFlingAccessLifecycleTests(unittest.TestCase):
         self.patch("is_root_equivalent_user", lambda value: False)
         self.patch("unix_user_identity", lambda value: identity if value == username else None)
         self.patch("unix_identity_mismatch", lambda value, expected: None)
+
+    def test_grant_state_lock_serializes_competing_process_and_reuses_stale_file(self) -> None:
+        child = r'''
+import importlib.machinery
+import importlib.util
+import json
+import sys
+
+loader = importlib.machinery.SourceFileLoader("sshfling_lock_child", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+try:
+    with module.grant_state_lock(sys.argv[2]):
+        print(json.dumps({"acquired": True}))
+except module.SSHFlingError as exc:
+    print(json.dumps({"code": exc.code, "message": exc.message, "details": exc.details}))
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            store = state_root / "password-grants"
+            environment = os.environ.copy()
+            environment["SSHFLING_GRANT_LOCK_TIMEOUT_SECONDS"] = "0.1"
+
+            with self.sshfling.grant_state_lock(store):
+                process = subprocess.run(
+                    [sys.executable, "-c", child, str(SSHFLING_PATH), str(store)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+
+            blocked = json.loads(process.stdout)
+            self.assertEqual(blocked["code"], 75)
+            self.assertIn("grant setup or prune operation is active", blocked["message"])
+            self.assertEqual(Path(blocked["details"]["lock_path"]), state_root / ".sshfling-grant-state.lock")
+
+            with self.sshfling.grant_state_lock(store) as lock_path:
+                self.assertEqual(lock_path, state_root / ".sshfling-grant-state.lock")
+            if os.name != "nt":
+                self.assertEqual((state_root / ".sshfling-grant-state.lock").stat().st_mode & 0o777, 0o600)
+            else:
+                self.assertTrue((state_root / ".sshfling-grant-state.lock").is_file())
+
+    @unittest.skipIf(os.name == "nt", "POSIX ownership and mode validation")
+    def test_grant_state_lock_rejects_writable_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp)
+            state_root.chmod(0o777)
+            try:
+                with self.assertRaises(self.sshfling.SSHFlingError) as raised:
+                    with self.sshfling.grant_state_lock(state_root / "password-grants"):
+                        self.fail("unsafe grant-state lock directory was accepted")
+            finally:
+                state_root.chmod(0o700)
+            self.assertEqual(raised.exception.code, 77)
+            self.assertIn("unsafe grant-state lock directory", raised.exception.message)
+
+            target = state_root / "operator-file"
+            target.write_text("preserve\n", encoding="utf-8")
+            lock_path = state_root / ".sshfling-grant-state.lock"
+            lock_path.symlink_to(target)
+            with self.assertRaises(self.sshfling.SSHFlingError) as symlink_error:
+                with self.sshfling.grant_state_lock(state_root / "password-grants"):
+                    self.fail("symlinked grant-state lock was accepted")
+            self.assertEqual(symlink_error.exception.code, 2)
+            self.assertEqual(target.read_text(encoding="utf-8"), "preserve\n")
+
+            unsafe_ancestor = state_root / "unsafe-ancestor"
+            safe_final_parent = unsafe_ancestor / "apparently-safe"
+            safe_final_parent.mkdir(parents=True)
+            unsafe_ancestor.chmod(0o777)
+            safe_final_parent.chmod(0o700)
+            with self.assertRaises(self.sshfling.SSHFlingError) as ancestor_error:
+                with self.sshfling.grant_state_lock(safe_final_parent / "password-grants"):
+                    self.fail("grant lock beneath a writable ancestor was accepted")
+            self.assertEqual(ancestor_error.exception.code, 77)
+            self.assertEqual(Path(ancestor_error.exception.details["path"]), unsafe_ancestor)
+
+    def test_cert_prune_lock_parent_failure_uses_json_error_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            blocking_file = Path(tmp) / "not-a-directory"
+            blocking_file.write_text("preserve\n", encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = self.sshfling.main(
+                    [
+                        "--json",
+                        "cert",
+                        "prune",
+                        "--all",
+                        "--session-dir",
+                        str(blocking_file / "sessions"),
+                    ]
+                )
+
+            self.assertEqual(code, 77)
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertIn("grant-state lock directory", payload["error"]["message"])
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(blocking_file.read_text(encoding="utf-8"), "preserve\n")
+
+    def test_mutating_grant_entry_points_hold_shared_lock(self) -> None:
+        events = []
+
+        @contextlib.contextmanager
+        def record_lock(store):
+            events.append(("enter", store))
+            try:
+                yield Path(store).parent / ".sshfling-grant-state.lock"
+            finally:
+                events.append(("exit", store))
+
+        self.patch("require_root", lambda action: None)
+        self.patch("grant_state_lock", record_lock)
+        self.patch("_cmd_setup_password_locked", lambda args: events.append(("password-setup", args.password_grant_dir)) or 0)
+        self.patch("_cmd_password_prune_locked", lambda args: events.append(("password-prune", args.password_grant_dir)) or 0)
+        self.patch("_cmd_setup_certificate_locked", lambda args: events.append(("certificate-setup", args.session_dir)) or 0)
+        self.patch("_cmd_cert_prune_locked", lambda args: events.append(("certificate-prune", args.session_dir)) or 0)
+
+        password_args = argparse.Namespace(password_grant_dir="/state/password-grants")
+        certificate_args = argparse.Namespace(session_dir="/state/sessions")
+        self.sshfling.cmd_setup_password(password_args)
+        self.sshfling.cmd_password_prune(password_args)
+        self.sshfling.cmd_setup_certificate(certificate_args)
+        self.sshfling.cmd_cert_prune(certificate_args)
+
+        self.assertEqual(
+            events,
+            [
+                ("enter", "/state/password-grants"),
+                ("password-setup", "/state/password-grants"),
+                ("exit", "/state/password-grants"),
+                ("enter", "/state/password-grants"),
+                ("password-prune", "/state/password-grants"),
+                ("exit", "/state/password-grants"),
+                ("enter", "/state/sessions"),
+                ("certificate-setup", "/state/sessions"),
+                ("exit", "/state/sessions"),
+                ("enter", "/state/sessions"),
+                ("certificate-prune", "/state/sessions"),
+                ("exit", "/state/sessions"),
+            ],
+        )
 
     def test_template_copy_restores_declared_executable_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

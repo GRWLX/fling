@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+from contextlib import contextmanager
 import datetime as dt
 import fnmatch
 import getpass
@@ -35,6 +36,7 @@ DEFAULT_SESSION_DIR = "/var/lib/sshfling/sessions"
 DEFAULT_POLICY_FILE = "/etc/sshfling/policy.json"
 DEFAULT_PASSWORD_GRANT_DIR = "/var/lib/sshfling/password-grants"
 DEFAULT_HOST_USER_MARKER_DIR = "/var/lib/sshfling/host-users"
+DEFAULT_GRANT_LOCK_TIMEOUT_SECONDS = 10.0
 DEFAULT_TEMP_USERNAME_PREFIX = "s"
 DEFAULT_DETACHED_DIR = ".sshfling/detached"
 MAX_TIME_SECONDS = 86400
@@ -752,6 +754,234 @@ def reject_symlink_component(path, action="manage"):
             path=str(Path(path).expanduser()),
             symlink=str(link),
         )
+
+
+def grant_state_lock_path(store_dir):
+    override = os.environ.get("SSHFLING_GRANT_LOCK_FILE")
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            raise SSHFlingError("SSHFLING_GRANT_LOCK_FILE must be an absolute path.", 2)
+        return path
+    store = Path(store_dir).expanduser()
+    if not store.is_absolute():
+        store = (Path.cwd() / store).resolve()
+    return store.parent / ".sshfling-grant-state.lock"
+
+
+def grant_lock_timeout_seconds():
+    raw = os.environ.get("SSHFLING_GRANT_LOCK_TIMEOUT_SECONDS")
+    if raw is None:
+        return DEFAULT_GRANT_LOCK_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError as exc:
+        raise SSHFlingError("SSHFLING_GRANT_LOCK_TIMEOUT_SECONDS must be numeric.", 2) from exc
+    if not 0 <= timeout <= 60:
+        raise SSHFlingError("SSHFLING_GRANT_LOCK_TIMEOUT_SECONDS must be between 0 and 60.", 2)
+    return timeout
+
+
+def validate_grant_lock_directory(path, require_owner=False):
+    path = Path(path)
+    if os.name == "nt":
+        return
+    if not path.is_absolute() or ".." in path.parts:
+        raise SSHFlingError(f"Refusing unsafe grant-state lock directory: {path}", 77, path=str(path))
+
+    euid = os.geteuid()
+    current = Path(path.anchor)
+    candidates = [current]
+    for component in path.parts[1:]:
+        current = current / component
+        candidates.append(current)
+
+    for current in candidates:
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise SSHFlingError(
+                f"Could not inspect grant-state lock directory: {current}",
+                75,
+                path=str(current),
+            ) from exc
+        mode = stat.S_IMODE(metadata.st_mode)
+        writable = mode & 0o022
+        sticky = mode & stat.S_ISVTX
+        owner_allowed = metadata.st_uid == 0 or (euid != 0 and metadata.st_uid == euid)
+        if not stat.S_ISDIR(metadata.st_mode) or not owner_allowed or (writable and not sticky):
+            raise SSHFlingError(
+                f"Refusing unsafe grant-state lock directory: {current}",
+                77,
+                path=str(current),
+            )
+        if require_owner and current == path and (metadata.st_uid != euid or writable):
+            raise SSHFlingError(
+                f"Refusing unsafe grant-state lock directory: {current}",
+                77,
+                path=str(current),
+            )
+
+
+def ensure_grant_lock_directory(path):
+    path = Path(path)
+    if os.name == "nt":
+        reject_symlink_component(path, "create grant-state lock directory")
+        try:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SSHFlingError(
+                f"Could not prepare grant-state lock directory: {path}",
+                75,
+                path=str(path),
+            ) from exc
+        reject_symlink_component(path, "create grant-state lock directory")
+        return
+
+    if not path.is_absolute() or ".." in path.parts:
+        raise SSHFlingError(f"Refusing unsafe grant-state lock directory: {path}", 77, path=str(path))
+
+    missing = []
+    current = path
+    while True:
+        try:
+            current.lstat()
+            break
+        except FileNotFoundError:
+            if current == current.parent:
+                raise SSHFlingError(
+                    f"Could not inspect grant-state lock directory: {current}",
+                    75,
+                    path=str(current),
+                )
+            missing.append(current.name)
+            current = current.parent
+        except OSError as exc:
+            raise SSHFlingError(
+                f"Could not inspect grant-state lock directory: {current}",
+                75,
+                path=str(current),
+            ) from exc
+
+    validate_grant_lock_directory(current)
+    for component in reversed(missing):
+        current = current / component
+        try:
+            current.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise SSHFlingError(
+                f"Could not prepare grant-state lock directory: {current}",
+                75,
+                path=str(current),
+            ) from exc
+        validate_grant_lock_directory(current, require_owner=True)
+    validate_grant_lock_directory(path, require_owner=True)
+
+
+def prepare_grant_lock_file(path):
+    path = Path(path)
+    reject_symlink_component(path, "open grant-state lock")
+    ensure_grant_lock_directory(path.parent)
+    reject_symlink_component(path, "open grant-state lock")
+
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise SSHFlingError(f"Could not open grant-state lock: {path}", 75, path=str(path)) from exc
+
+    try:
+        if hasattr(os, "fchmod"):
+            try:
+                os.fchmod(descriptor, 0o600)
+            except OSError as exc:
+                raise SSHFlingError(
+                    f"Could not secure grant-state lock: {path}",
+                    75,
+                    path=str(path),
+                ) from exc
+        lock_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(lock_stat.st_mode):
+            raise SSHFlingError(f"Grant-state lock is not a regular file: {path}", 77, path=str(path))
+        if os.name != "nt" and lock_stat.st_uid != os.geteuid():
+            raise SSHFlingError(f"Grant-state lock has an unsafe owner: {path}", 77, path=str(path))
+        if os.name != "nt" and lock_stat.st_mode & 0o077:
+            raise SSHFlingError(f"Grant-state lock has unsafe permissions: {path}", 77, path=str(path))
+        return descriptor
+    except OSError as exc:
+        os.close(descriptor)
+        raise SSHFlingError(f"Could not inspect grant-state lock: {path}", 75, path=str(path)) from exc
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def try_grant_file_lock(descriptor):
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+
+    import fcntl
+
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+
+
+def release_grant_file_lock(descriptor):
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+@contextmanager
+def grant_state_lock(store_dir):
+    path = grant_state_lock_path(store_dir)
+    timeout = grant_lock_timeout_seconds()
+    descriptor = prepare_grant_lock_file(path)
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while True:
+            if try_grant_file_lock(descriptor):
+                acquired = True
+                break
+            if time.monotonic() >= deadline:
+                raise SSHFlingError(
+                    "Another SSHFling grant setup or prune operation is active.",
+                    75,
+                    lock_path=str(path),
+                    timeout_seconds=timeout,
+                )
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        yield path
+    finally:
+        if acquired:
+            release_grant_file_lock(descriptor)
+        os.close(descriptor)
 
 
 def prepare_root_managed_parent(path, action="install", dry_run=False):
@@ -1953,7 +2183,7 @@ def prune_certificate_sessions(session_dir, username=None, all_sessions=False, d
     return results
 
 
-def cmd_cert_prune(args):
+def _cmd_cert_prune_locked(args):
     results = prune_certificate_sessions(
         args.session_dir,
         username=args.username,
@@ -1976,6 +2206,11 @@ def cmd_cert_prune(args):
         for item in results:
             print(json.dumps(item, sort_keys=True))
     return 0
+
+
+def cmd_cert_prune(args):
+    with grant_state_lock(args.session_dir):
+        return _cmd_cert_prune_locked(args)
 
 
 def random_username(prefix=DEFAULT_TEMP_USERNAME_PREFIX):
@@ -2456,7 +2691,7 @@ Match User {username}
 """
 
 
-def cmd_setup_password(args):
+def _cmd_setup_password_locked(args):
     require_root("temporary password SSH access")
     require_password_host_tools()
     if not args.username:
@@ -2676,6 +2911,12 @@ def cmd_setup_password(args):
     return 0
 
 
+def cmd_setup_password(args):
+    require_root("temporary password SSH access")
+    with grant_state_lock(args.password_grant_dir):
+        return _cmd_setup_password_locked(args)
+
+
 def certificate_setup_options(args):
     options = []
     for attr, label in [
@@ -2719,7 +2960,7 @@ def cmd_setup(args):
     return cmd_setup_password(args)
 
 
-def cmd_setup_certificate(args):
+def _cmd_setup_certificate_locked(args):
     if not getattr(args, "certificate", False):
         raise SSHFlingError("Certificate setup requires --certificate.", 2)
     require_root("temporary SSH access")
@@ -2821,6 +3062,12 @@ def cmd_setup_certificate(args):
             print(result["certificate"])
         print(f"ssh: {result['ssh_command']}")
     return 0
+
+
+def cmd_setup_certificate(args):
+    require_root("temporary SSH access")
+    with grant_state_lock(args.session_dir):
+        return _cmd_setup_certificate_locked(args)
 
 
 def process_exists(pid):
@@ -4295,7 +4542,7 @@ def prune_password_grants(grant_dir, username=None, all_grants=False, delete_use
     return results
 
 
-def cmd_password_prune(args):
+def _cmd_password_prune_locked(args):
     require_root("password prune")
     grant_results = prune_password_grants(
         args.password_grant_dir,
@@ -4325,6 +4572,12 @@ def cmd_password_prune(args):
         for item in grant_results:
             print(json.dumps(item, sort_keys=True))
     return 0
+
+
+def cmd_password_prune(args):
+    require_root("password prune")
+    with grant_state_lock(args.password_grant_dir):
+        return _cmd_password_prune_locked(args)
 
 
 def cmd_host_install(args):

@@ -1,0 +1,507 @@
+#!/bin/bash -p
+set -euo pipefail
+
+LC_ALL=C
+PATH="/usr/sbin:/usr/bin:/sbin:/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/run/current-system/profile/bin:/var/guix/profiles/system/profile/bin"
+export LC_ALL PATH
+unset BASH_ENV ENV CDPATH GLOBIGNORE 2>/dev/null || true
+
+die() {
+  local message="$1"
+  local code="${2:-1}"
+  printf 'sshfling-native-prune: %s\n' "$message" >&2
+  exit "$code"
+}
+
+stat_owner_mode() {
+  local path="$1"
+  local values owner mode
+
+  if values="$(stat -c '%u %a' "$path" 2>/dev/null)"; then
+    :
+  elif values="$(stat -f '%u %Lp' "$path" 2>/dev/null)"; then
+    :
+  else
+    return 1
+  fi
+  owner="${values%% *}"
+  mode="${values#* }"
+  [[ "$owner" =~ ^(0|[1-9][0-9]*)$ && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  printf '%s %s\n' "$owner" "$mode"
+}
+
+trusted_directory() {
+  local path="$1"
+  local require_owner="$2"
+  local current="" component values owner mode mode_value
+  local -a components=()
+
+  [[ "$path" == /* && "$path" != *$'\n'* && "$path" != *$'\r'* && "$path" != *$'\t'* \
+    && -d "$path" && ! -L "$path" ]] || return 1
+  if [[ "$path" == / ]]; then
+    values="$(stat_owner_mode "$path")" || return 1
+    owner="${values%% *}"
+    mode="${values#* }"
+    [[ "$owner" == 0 || ( "$EUID" != 0 && "$owner" == "$EUID" ) ]] || return 1
+    mode_value=$(( 8#$mode ))
+    (( (mode_value & 0022) == 0 || (mode_value & 01000) != 0 )) || return 1
+    if [[ "$require_owner" == 1 ]]; then
+      [[ "$owner" == "$EUID" ]] || return 1
+      (( (mode_value & 0022) == 0 )) || return 1
+    fi
+    return 0
+  fi
+  case "$path" in
+    */|*//*|*/./*|*/../*|*/.|*/..) return 1 ;;
+  esac
+  IFS=/ read -r -a components <<<"${path#/}"
+  for component in "${components[@]}"; do
+    [[ -n "$component" ]] || return 1
+    current="${current}/${component}"
+    [[ -d "$current" && ! -L "$current" ]] || return 1
+    values="$(stat_owner_mode "$current")" || return 1
+    owner="${values%% *}"
+    mode="${values#* }"
+    [[ "$owner" == 0 || ( "$EUID" != 0 && "$owner" == "$EUID" ) ]] || return 1
+    mode_value=$(( 8#$mode ))
+    if (( (mode_value & 0022) != 0 && (mode_value & 01000) == 0 )); then
+      return 1
+    fi
+    if [[ "$require_owner" == 1 && "$current" == "$path" ]]; then
+      [[ "$owner" == "$EUID" ]] || return 1
+      (( (mode_value & 0022) == 0 )) || return 1
+    fi
+  done
+}
+
+ensure_trusted_directory() {
+  local path="$1"
+  local current parent component next
+  local -a missing=()
+
+  if trusted_directory "$path" 1; then
+    return 0
+  fi
+  [[ ! -e "$path" && ! -L "$path" ]] || return 1
+
+  current="$path"
+  while [[ ! -e "$current" && ! -L "$current" ]]; do
+    [[ "$current" != / ]] || return 1
+    component="${current##*/}"
+    [[ -n "$component" ]] || return 1
+    missing=("$component" "${missing[@]}")
+    parent="${current%/*}"
+    [[ -n "$parent" ]] || parent=/
+    current="$parent"
+  done
+  trusted_directory "$current" 0 || return 1
+
+  for component in "${missing[@]}"; do
+    if [[ "$current" == / ]]; then
+      next="/$component"
+    else
+      next="$current/$component"
+    fi
+    if ! (umask 077; mkdir -- "$next") 2>/dev/null; then
+      trusted_directory "$next" 1 || return 1
+    else
+      trusted_directory "$next" 1 || return 1
+    fi
+    current="$next"
+  done
+  trusted_directory "$path" 1
+}
+
+native_tool_directory="${SSHFLING_NATIVE_TOOL_DIR:-}"
+native_tool_path="${SSHFLING_NATIVE_TOOL_PATH:-}"
+unset SSHFLING_NATIVE_TOOL_DIR SSHFLING_NATIVE_TOOL_PATH
+if [[ -n "$native_tool_directory" ]]; then
+  trusted_directory "$native_tool_directory" 1 \
+    || die "refusing unsafe native tool directory: $native_tool_directory" 77
+  PATH="$native_tool_directory:$PATH"
+fi
+if [[ -n "$native_tool_path" ]]; then
+  case "$native_tool_path" in
+    :*|*:|*::*) die "refusing an empty native tool path entry" 77 ;;
+  esac
+  IFS=: read -r -a native_tool_directories <<<"$native_tool_path"
+  for native_tool_directory in "${native_tool_directories[@]}"; do
+    [[ -n "$native_tool_directory" ]] || die "refusing an empty native tool path entry" 77
+    trusted_directory "$native_tool_directory" 1 \
+      || die "refusing unsafe native tool directory: $native_tool_directory" 77
+    PATH="$native_tool_directory:$PATH"
+  done
+fi
+export PATH
+unset native_tool_directory native_tool_directories native_tool_path
+
+require_tool() {
+  command -v "$1" >/dev/null 2>&1 || die "missing command: $1" 127
+}
+
+valid_principal() {
+  [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,127}$ ]]
+}
+
+emit_status() {
+  local metadata_path="$1"
+  local username="$2"
+  local status="$3"
+  local reason="${4:-}"
+
+  if [[ -n "$reason" ]]; then
+    jq -cn \
+      --arg record result \
+      --arg mode certificate \
+      --arg metadata_path "$metadata_path" \
+      --arg username "$username" \
+      --arg status "$status" \
+      --arg reason "$reason" \
+      '{record:$record,mode:$mode,metadata_path:$metadata_path,username:$username,status:$status,reason:$reason}'
+  else
+    jq -cn \
+      --arg record result \
+      --arg mode certificate \
+      --arg metadata_path "$metadata_path" \
+      --arg username "$username" \
+      --arg status "$status" \
+      '{record:$record,mode:$mode,metadata_path:$metadata_path,username:$username,status:$status}'
+  fi
+  output_count=$(( output_count + 1 ))
+}
+
+json_optional_string() {
+  local metadata_path="$1"
+  local field="$2"
+  local value
+
+  value="$(jq -er --arg field "$field" '
+    .[$field] as $value |
+    if $value == null then ""
+    elif ($value | type) == "string" then $value
+    else error("field must be a string or null")
+    end
+  ' "$metadata_path")" || return 1
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* ]] || return 1
+  printf '%s\n' "$value"
+}
+
+safe_material_path() {
+  local path="$1"
+  local material_dir="$2"
+  local relative values owner mode mode_value
+
+  [[ -n "$path" ]] || return 0
+  [[ "$path" == /* && "$path" != *$'\n'* && "$path" != *$'\r'* && "$path" != *$'\t'* ]] \
+    || return 1
+  case "$path" in
+    */|*//*|*/./*|*/../*|*/.|*/..) return 1 ;;
+  esac
+  case "$path" in
+    "$material_dir"/*) ;;
+    *) return 1 ;;
+  esac
+  relative="${path#"$material_dir"/}"
+  [[ -n "$relative" && "$relative" != */* ]] || return 1
+  if [[ -e "$path" || -L "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] || return 1
+    values="$(stat_owner_mode "$path")" || return 1
+    owner="${values%% *}"
+    mode="${values#* }"
+    [[ "$owner" == "$EUID" ]] || return 1
+    mode_value=$(( 8#$mode ))
+    (( (mode_value & 0022) == 0 )) || return 1
+  fi
+}
+
+material_result() {
+  local path="$1"
+
+  if [[ -z "$path" ]]; then
+    jq -cn '{status:"not-tracked"}'
+  elif [[ ! -e "$path" ]]; then
+    jq -cn --arg path "$path" '{path:$path,status:"missing"}'
+  elif [[ "$dry_run" == 1 ]]; then
+    jq -cn --arg path "$path" '{path:$path,would_remove:true,dry_run:true}'
+  else
+    rm -f -- "$path" || return "$?"
+    jq -cn --arg path "$path" '{path:$path,removed:true}'
+  fi
+}
+
+prune_certificate_record() {
+  local metadata_path="$1"
+  local material_dir directory_name username managed_by auth expires_at
+  local private_key public_key certificate
+  local private_result public_result certificate_result metadata_result directory_result
+  local path metadata_values metadata_owner metadata_mode metadata_mode_value
+
+  material_dir="${metadata_path%/*}"
+  directory_name="${material_dir##*/}"
+  if [[ -L "$metadata_path" || ! -f "$metadata_path" ]]; then
+    emit_status "$metadata_path" "" skipped-unsafe-path "certificate metadata must be a regular non-symlink file"
+    return
+  fi
+  metadata_values="$(stat_owner_mode "$metadata_path")" || {
+    emit_status "$metadata_path" "" skipped-unsafe-path "certificate metadata could not be inspected"
+    return
+  }
+  metadata_owner="${metadata_values%% *}"
+  metadata_mode="${metadata_values#* }"
+  metadata_mode_value=$(( 8#$metadata_mode ))
+  if [[ "$metadata_owner" != "$EUID" ]] || (( (metadata_mode_value & 0022) != 0 )); then
+    emit_status "$metadata_path" "" skipped-unsafe-path "certificate metadata has unsafe ownership or permissions"
+    return
+  fi
+  if ! trusted_directory "$material_dir" 1; then
+    emit_status "$metadata_path" "" skipped-unsafe-path "certificate material directory is not trusted"
+    return
+  fi
+  if ! jq -e 'type == "object"' "$metadata_path" >/dev/null 2>&1; then
+    emit_status "$metadata_path" "" skipped-invalid-metadata
+    return
+  fi
+
+  if ! username="$(json_optional_string "$metadata_path" username)"; then
+    emit_status "$metadata_path" "" skipped-invalid-metadata
+    return
+  fi
+  if [[ -z "$username" ]]; then
+    username="${directory_name%%-*}"
+  fi
+  if ! valid_principal "$username"; then
+    emit_status "$metadata_path" "$username" skipped-invalid-principal
+    return
+  fi
+  if [[ -n "$selector_username" && "$username" != "$selector_username" ]]; then
+    return
+  fi
+
+  if ! managed_by="$(json_optional_string "$metadata_path" managed_by)" \
+    || ! auth="$(json_optional_string "$metadata_path" auth)"; then
+    emit_status "$metadata_path" "$username" skipped-invalid-metadata
+    return
+  fi
+  if [[ "$managed_by" != sshfling || "$auth" != certificate ]]; then
+    emit_status "$metadata_path" "$username" skipped-unmanaged
+    return
+  fi
+  if ! expires_at="$(jq -er '
+    .expires_at |
+    select(type == "number" and . == floor and . >= 1 and . <= 253402300799) |
+    tostring
+  ' "$metadata_path")"; then
+    emit_status "$metadata_path" "$username" skipped-invalid-metadata
+    return
+  fi
+  if (( expires_at > now )); then
+    jq -cn \
+      --arg record result \
+      --arg mode certificate \
+      --arg metadata_path "$metadata_path" \
+      --arg username "$username" \
+      --arg status active \
+      --argjson expires_at "$expires_at" \
+      '{record:$record,mode:$mode,metadata_path:$metadata_path,username:$username,status:$status,expires_at:$expires_at}'
+    output_count=$(( output_count + 1 ))
+    return
+  fi
+
+  if ! private_key="$(json_optional_string "$metadata_path" private_key)" \
+    || ! public_key="$(json_optional_string "$metadata_path" public_key)" \
+    || ! certificate="$(json_optional_string "$metadata_path" certificate)"; then
+    emit_status "$metadata_path" "$username" skipped-invalid-metadata
+    return
+  fi
+  for path in "$private_key" "$public_key" "$certificate"; do
+    if ! safe_material_path "$path" "$material_dir"; then
+      emit_status "$metadata_path" "$username" skipped-unsafe-path "tracked certificate material is outside the trusted session directory"
+      return
+    fi
+  done
+
+  private_result="$(material_result "$private_key")"
+  public_result="$(material_result "$public_key")"
+  certificate_result="$(material_result "$certificate")"
+  if [[ "$dry_run" == 1 ]]; then
+    metadata_result="$(jq -cn --arg path "$metadata_path" '{path:$path,would_remove:true,dry_run:true}')"
+    directory_result="$(jq -cn --arg path "$material_dir" '{path:$path,would_remove_if_empty:true,dry_run:true}')"
+  else
+    rm -f -- "$metadata_path"
+    metadata_result="$(jq -cn --arg path "$metadata_path" '{path:$path,removed:true}')"
+    if rmdir -- "$material_dir" 2>/dev/null; then
+      directory_result="$(jq -cn --arg path "$material_dir" '{path:$path,removed:true}')"
+    else
+      directory_result="$(jq -cn --arg path "$material_dir" '{path:$path,status:"not-empty"}')"
+    fi
+  fi
+  jq -cn \
+    --arg record result \
+    --arg mode certificate \
+    --arg metadata_path "$metadata_path" \
+    --arg username "$username" \
+    --arg status pruned \
+    --argjson expires_at "$expires_at" \
+    --argjson private_key "$private_result" \
+    --argjson public_key "$public_result" \
+    --argjson certificate "$certificate_result" \
+    --argjson metadata "$metadata_result" \
+    --argjson directory "$directory_result" \
+    '{record:$record,mode:$mode,metadata_path:$metadata_path,username:$username,expires_at:$expires_at,status:$status,private_key:$private_key,public_key:$public_key,certificate:$certificate,metadata:$metadata,directory:$directory}'
+  output_count=$(( output_count + 1 ))
+}
+
+mode="${1:-}"
+[[ -n "$mode" ]] || die "usage: certificate (--all | --username PRINCIPAL) [--session-dir DIR] [--dry-run]" 2
+shift
+[[ "$mode" == certificate ]] \
+  || die "only certificate pruning is available in this staged native helper" 2
+
+selector_all=0
+selector_username=""
+session_dir="/var/lib/sshfling/sessions"
+dry_run=0
+now="${SSHFLING_PRUNE_NOW:-}"
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --all)
+      selector_all=1
+      shift
+      ;;
+    --username)
+      [[ "$#" -ge 2 ]] || die "--username requires a value" 2
+      selector_username="$2"
+      shift 2
+      ;;
+    --session-dir)
+      [[ "$#" -ge 2 ]] || die "--session-dir requires a value" 2
+      session_dir="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    *) die "unknown certificate prune option: $1" 2 ;;
+  esac
+done
+[[ "$selector_all" -ne 1 || -z "$selector_username" ]] \
+  || die "use exactly one of --username or --all for certificate prune" 2
+[[ "$selector_all" -eq 1 || -n "$selector_username" ]] \
+  || die "use exactly one of --username or --all for certificate prune" 2
+if [[ -n "$selector_username" ]]; then
+  valid_principal "$selector_username" || die "invalid certificate principal: $selector_username" 2
+fi
+
+require_tool jq
+require_tool flock
+require_tool stat
+require_tool find
+require_tool sort
+require_tool mktemp
+require_tool rm
+require_tool rmdir
+require_tool mkdir
+require_tool chmod
+require_tool date
+
+if [[ -z "$now" ]]; then
+  now="$(date +%s)"
+fi
+[[ "$now" =~ ^[1-9][0-9]*$ ]] || die "SSHFLING_PRUNE_NOW must be a positive Unix timestamp" 2
+jq -en --arg value "$now" '($value | tonumber) <= 253402300799' >/dev/null \
+  || die "SSHFLING_PRUNE_NOW is outside the supported timestamp range" 2
+
+[[ "$session_dir" == /* && "$session_dir" != *$'\n'* && "$session_dir" != *$'\r'* \
+  && "$session_dir" != *$'\t'* ]] || die "session directory must be an absolute control-free path" 2
+case "$session_dir" in
+  *//*|*/./*|*/../*|*/.|*/..) die "session directory must be canonical" 2 ;;
+esac
+session_dir="${session_dir%/}"
+[[ -n "$session_dir" ]] || die "session directory must not be root" 2
+session_parent="${session_dir%/*}"
+[[ -n "$session_parent" ]] || session_parent=/
+ensure_trusted_directory "$session_parent" \
+  || die "refusing unsafe grant-state directory: $session_parent" 77
+
+if [[ "$session_parent" == / ]]; then
+  default_lock_file="/.sshfling-grant-state.lock"
+else
+  default_lock_file="$session_parent/.sshfling-grant-state.lock"
+fi
+lock_file="${SSHFLING_GRANT_LOCK_FILE:-$default_lock_file}"
+[[ "$lock_file" == /* && "$lock_file" != *$'\n'* && "$lock_file" != *$'\r'* \
+  && "$lock_file" != *$'\t'* ]] \
+  || die "refusing unsafe grant-state lock path: $lock_file" 77
+case "$lock_file" in
+  /|*/|*//*|*/./*|*/../*|*/.|*/..) die "refusing unsafe grant-state lock path: $lock_file" 77 ;;
+esac
+lock_parent="${lock_file%/*}"
+[[ -n "$lock_parent" ]] || lock_parent=/
+ensure_trusted_directory "$lock_parent" \
+  || die "refusing unsafe grant-state lock directory: $lock_parent" 77
+[[ ! -L "$lock_file" ]] || die "refusing unsafe grant-state lock path: $lock_file" 77
+if [[ ! -e "$lock_file" ]]; then
+  (umask 077; set -o noclobber; : >"$lock_file") 2>/dev/null || true
+fi
+[[ -f "$lock_file" && ! -L "$lock_file" ]] || die "grant-state lock is not a regular file" 77
+chmod 0600 "$lock_file"
+lock_values="$(stat_owner_mode "$lock_file")" || die "could not inspect grant-state lock" 77
+[[ "${lock_values%% *}" == "$EUID" && "${lock_values#* }" == 600 ]] \
+  || die "grant-state lock has unsafe ownership or permissions" 77
+
+exec 9<>"$lock_file"
+lock_timeout="${SSHFLING_GRANT_LOCK_TIMEOUT_SECONDS:-10}"
+[[ "$lock_timeout" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || die "invalid grant-state lock timeout" 2
+jq -en --arg value "$lock_timeout" '($value | tonumber) >= 0 and ($value | tonumber) <= 60' >/dev/null \
+  || die "grant-state lock timeout must be between 0 and 60 seconds" 2
+if ! flock -w "$lock_timeout" 9; then
+  die "another SSHFling grant setup or prune operation is active" 75
+fi
+
+if [[ ! -e "$session_dir" ]]; then
+  exit 0
+fi
+trusted_directory "$session_dir" 1 \
+  || die "refusing unsafe certificate session directory: $session_dir" 77
+
+output_count=0
+scan_file=""
+cleanup_scan_file() {
+  if [[ -n "$scan_file" && ( -e "$scan_file" || -L "$scan_file" ) ]]; then
+    rm -f -- "$scan_file" 2>/dev/null || true
+  fi
+}
+trap cleanup_scan_file EXIT
+if [[ "$session_parent" == / ]]; then
+  scan_template="/.sshfling-prune-scan.XXXXXXXX"
+else
+  scan_template="$session_parent/.sshfling-prune-scan.XXXXXXXX"
+fi
+scan_file="$(mktemp "$scan_template")" \
+  || die "could not create certificate session scan file" 74
+scan_values="$(stat_owner_mode "$scan_file")" \
+  || die "could not inspect certificate session scan file" 74
+[[ "${scan_values%% *}" == "$EUID" && "${scan_values#* }" == 600 && ! -L "$scan_file" ]] \
+  || die "certificate session scan file has unsafe ownership or permissions" 77
+if ! find "$session_dir" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z >"$scan_file"; then
+  die "could not enumerate certificate sessions" 74
+fi
+while IFS= read -r -d '' material_dir; do
+  metadata_path="$material_dir/sshfling-cert.json"
+  if [[ -e "$metadata_path" || -L "$metadata_path" ]]; then
+    prune_certificate_record "$metadata_path"
+  fi
+done <"$scan_file"
+rm -f -- "$scan_file"
+scan_file=""
+
+if [[ -n "$selector_username" && "$output_count" -eq 0 ]]; then
+  jq -cn \
+    --arg record result \
+    --arg mode certificate \
+    --arg username "$selector_username" \
+    --arg status missing \
+    --arg session_dir "$session_dir" \
+    '{record:$record,mode:$mode,username:$username,status:$status,session_dir:$session_dir}'
+fi
