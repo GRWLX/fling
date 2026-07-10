@@ -85,7 +85,6 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             by_language.setdefault(cell["language"], []).append(cell)
 
         for language in (
-            "Swift",
             "Smalltalk",
             "APL",
             "Q/KDB+",
@@ -117,6 +116,7 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             by_language.setdefault(cell["language"], []).append(cell)
 
         for language in (
+            "Swift",
             "Dart",
             "Julia",
             "V",

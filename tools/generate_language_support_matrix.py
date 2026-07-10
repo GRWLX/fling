@@ -324,10 +324,10 @@ LANGUAGE_SUPPORT: list[dict[str, str]] = [
     ),
     row(
         "Swift",
-        "BLOCKED",
-        "Swift package metadata and runtime layout are tracked under packaging/systems-languages/swift.",
-        BLOCKED_TOOLCHAIN_EVIDENCE,
-        "Promotion requires the Swift toolchain on the validation host.",
+        "PASS",
+        "SwiftPM package metadata, library sources, executable, and external consumer are tracked under packaging/systems-languages/swift.",
+        PASS_SYSTEM_LANGUAGES_EVIDENCE,
+        "Hosted Swift validation builds and installs the versioned archive, executes the library consumer and CLI workflows, and verifies removal in an isolated tree.",
     ),
     row(
         "R",

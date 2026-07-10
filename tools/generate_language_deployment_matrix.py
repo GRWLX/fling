@@ -1646,6 +1646,30 @@ DEPLOYMENTS.append(
 DEPLOYMENTS.extend(
     [
         validated_batch_package(
+            "swift-swiftpm-library",
+            "Swift",
+            "SwiftPM",
+            "Swift package dependency and executable",
+            "library + CLI",
+            "sshfling-swift-VERSION.tar.gz",
+            "package-systems-languages",
+            "packaging/systems-languages/swift",
+            [
+                "packaging/systems-languages/swift/Package.swift",
+                "packaging/systems-languages/swift/Sources/SSHFling/SSHFling.swift",
+                "packaging/systems-languages/swift/Sources/sshfling/main.swift",
+                "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Package.swift",
+                "packaging/systems-languages/swift/Consumers/SSHFlingConsumer/Sources/SSHFlingConsumer/main.swift",
+                "packaging/build-systems-languages.sh",
+            ],
+            "Package.swift declares the Swift library and executable products while the external consumer uses an explicit local package dependency.",
+            "The systems validator extracts the deterministic archive, builds the package and external consumer with SwiftPM, and executes both.",
+            "The versioned archive contains the SwiftPM manifest, library, executable, consumer project, canonical runtime, templates, and inventory manifest.",
+            "A separate SwiftPM project imports the extracted SSHFling product without repository-wide package paths.",
+            "The Swift library exposes argument-array execution and the package provides a matching executable command.",
+            "The consumer and CLI validate version, init, invalid option, missing runtime, archive installation, removal, and import absence.",
+        ),
+        validated_batch_package(
             "julia-pkg-library",
             "Julia",
             "Julia Pkg",
@@ -1858,7 +1882,7 @@ FIRST_91_CATALOG: tuple[tuple[str, str], ...] = (
     ("Bash", "PASS"),
     ("PowerShell", "PASS"),
     ("Kotlin", "PASS"),
-    ("Swift", "BLOCKED"),
+    ("Swift", "PASS"),
     ("R", "PASS"),
     ("Ruby", "PASS"),
     ("Dart", "PASS"),
@@ -2387,6 +2411,7 @@ CATALOG_SURFACES.extend(
 )
 
 _PROMOTED_RUNTIME_SURFACES = {
+    "swift-swiftpm-runtime",
     "dart-pub-runtime",
     "julia-pkg-runtime",
     "janet-jpm-runtime",
