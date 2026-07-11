@@ -1,23 +1,26 @@
 # Template file for 'sshfling'
 pkgname=sshfling
-version=0.1.11
+version=0.1.16
 revision=1
-depends="python3 openssh shadow procps-ng util-linux"
-short_desc="Temporary SSH certificate issuer and access CLI"
+depends="bash python3 openssh openssl shadow procps-ng util-linux jq"
+short_desc="Temporary SSH access broker and CLI"
 maintainer="GRWLX <44076838+GRWLX@users.noreply.github.com>"
 license="LicenseRef-SSHFling-Commercial"
 homepage="https://grwlx.github.io/sshfling"
-distfiles="https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz"
-checksum=324db74ac9f35977c89fe2922ace7609251915fc2e9b67e468d8f56e6f4ecef8
+distfiles="https://grwlx.github.io/sshfling/downloads/sshfling-0.1.16.tar.gz"
+checksum=78feb8fcc0344c9da3dfd1ef5305e9637dbd359749df1fcd6c51ed7ee961d4c4
 
 do_install() {
 	vbin bin/sshfling
+	vinstall native/sshfling-linux-account 755 usr/libexec/sshfling
+	vinstall native/sshfling-unix-identity 755 usr/libexec/sshfling
+	vinstall production/sshfling-login-shell 755 usr/share/sshfling/templates/production
 	vinstall production/sshfling-session 755 usr/share/sshfling/templates/production
 	vinstall packaging/policy.json 644 etc/sshfling
 	vlicense LICENSE
 	vdoc README.md
 	vmkdir usr/share/sshfling/templates
-	for path in .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd; do
+	for path in .env.example LICENSE README.md compose.server.yml compose.client.yml native scripts secrets ssh-client ssh-server production systemd; do
 		vcopy "$path" usr/share/sshfling/templates
 	done
 }

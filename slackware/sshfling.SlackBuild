@@ -2,7 +2,7 @@
 set -eu
 
 PRGNAM=sshfling
-VERSION=${VERSION:-0.1.11}
+VERSION=${VERSION:-0.1.16}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 ARCH=${ARCH:-noarch}
@@ -17,12 +17,15 @@ tar xvf "$CWD/$PRGNAM-$VERSION.tar.gz" -C "$TMP"
 cd "$TMP/$PRGNAM-$VERSION"
 
 install -Dm755 bin/sshfling "$PKG/usr/bin/sshfling"
+install -Dm755 native/sshfling-linux-account "$PKG/usr/libexec/sshfling/sshfling-linux-account"
+install -Dm755 native/sshfling-unix-identity "$PKG/usr/libexec/sshfling/sshfling-unix-identity"
+install -Dm755 production/sshfling-login-shell "$PKG/usr/share/sshfling/templates/production/sshfling-login-shell"
 install -Dm755 production/sshfling-session "$PKG/usr/share/sshfling/templates/production/sshfling-session"
 install -Dm644 packaging/policy.json "$PKG/etc/sshfling/policy.json"
 install -Dm644 LICENSE "$PKG/usr/doc/$PRGNAM-$VERSION/LICENSE"
 install -Dm644 README.md "$PKG/usr/doc/$PRGNAM-$VERSION/README.md"
 mkdir -p "$PKG/usr/share/sshfling/templates"
-cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd "$PKG/usr/share/sshfling/templates/"
+cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml native scripts secrets ssh-client ssh-server production systemd "$PKG/usr/share/sshfling/templates/"
 mkdir -p "$PKG/install"
 cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
 

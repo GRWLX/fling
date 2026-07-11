@@ -1,18 +1,21 @@
 pkgbase = sshfling
-	pkgdesc = Temporary SSH certificate issuer and access CLI
-	pkgver = 0.1.11
+	pkgdesc = Temporary SSH access broker and CLI
+	pkgver = 0.1.16
 	pkgrel = 1
 	url = https://grwlx.github.io/sshfling
 	arch = any
 	license = LicenseRef-SSHFling-Commercial
 	depends = python
+	depends = bash
 	depends = openssh
+	depends = openssl
 	depends = shadow
 	depends = procps-ng
 	depends = util-linux
+	depends = jq
 	optdepends = docker: Docker Compose test harness
 	backup = etc/sshfling/policy.json
-	source = sshfling-0.1.11.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz
-	sha256sums = 324db74ac9f35977c89fe2922ace7609251915fc2e9b67e468d8f56e6f4ecef8
+	source = sshfling-0.1.16.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.16.tar.gz
+	sha256sums = 78feb8fcc0344c9da3dfd1ef5305e9637dbd359749df1fcd6c51ed7ee961d4c4
 
 pkgname = sshfling

@@ -1,27 +1,30 @@
 # Contributor: GRWLX <44076838+GRWLX@users.noreply.github.com>
 # Maintainer: GRWLX <44076838+GRWLX@users.noreply.github.com>
 pkgname=sshfling
-pkgver=0.1.11
+pkgver=0.1.16
 pkgrel=0
-pkgdesc="Temporary SSH certificate issuer and access CLI"
+pkgdesc="Temporary SSH access broker and CLI"
 url="https://grwlx.github.io/sshfling"
 arch="noarch"
 license="LicenseRef-SSHFling-Commercial"
-depends="python3 openssh-client shadow procps util-linux"
+depends="bash python3 openssh-client openssl shadow procps util-linux jq"
 options="!check"
-source="$pkgname-$pkgver.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz"
+source="$pkgname-$pkgver.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.16.tar.gz"
 builddir="$srcdir/$pkgname-$pkgver"
 
 package() {
 	install -Dm755 "$builddir/bin/sshfling" "$pkgdir/usr/bin/sshfling"
+	install -Dm755 "$builddir/native/sshfling-linux-account" "$pkgdir/usr/libexec/sshfling/sshfling-linux-account"
+	install -Dm755 "$builddir/native/sshfling-unix-identity" "$pkgdir/usr/libexec/sshfling/sshfling-unix-identity"
+	install -Dm755 "$builddir/production/sshfling-login-shell" "$pkgdir/usr/share/sshfling/templates/production/sshfling-login-shell"
 	install -Dm755 "$builddir/production/sshfling-session" "$pkgdir/usr/share/sshfling/templates/production/sshfling-session"
 	install -Dm644 "$builddir/packaging/policy.json" "$pkgdir/etc/sshfling/policy.json"
 	install -Dm644 "$builddir/LICENSE" "$pkgdir/usr/share/licenses/sshfling/LICENSE"
 	install -Dm644 "$builddir/README.md" "$pkgdir/usr/share/doc/sshfling/README.md"
 	mkdir -p "$pkgdir/usr/share/sshfling/templates"
-	cp -a "$builddir"/.env.example "$builddir"/LICENSE "$builddir"/README.md "$builddir"/compose.server.yml "$builddir"/compose.client.yml 		"$builddir"/scripts "$builddir"/secrets "$builddir"/ssh-client "$builddir"/ssh-server "$builddir"/production "$builddir"/systemd 		"$pkgdir/usr/share/sshfling/templates/"
+	cp -a "$builddir"/.env.example "$builddir"/LICENSE "$builddir"/README.md "$builddir"/compose.server.yml "$builddir"/compose.client.yml 		"$builddir"/native "$builddir"/scripts "$builddir"/secrets "$builddir"/ssh-client "$builddir"/ssh-server "$builddir"/production "$builddir"/systemd 		"$pkgdir/usr/share/sshfling/templates/"
 }
 
 sha512sums="
-fdd0f2aae6d72c59df38db12fb72d5dfe1b7b225cb22c16e2f09ffc8cc45eef39aabb5b0d6758c34299192b0e98a9e3406fb089c6b4a603eab49ae7bf73b9a34  $pkgname-$pkgver.tar.gz
+f56a9a20adb7a6b78a8e9e768ac882050a8af50afe0514eb0701cc591e9ef751b5850c360c0dd6ab00f34d100689f8c6224ee94a9005277388c2189b1178f18c  $pkgname-$pkgver.tar.gz
 "

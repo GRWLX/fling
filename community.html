@@ -1,43 +1,25 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SSHFling 0.1.11 community package manifests</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; line-height: 1.5; }
-    code, pre { background: #f4f4f5; border-radius: 6px; }
-    code { padding: 2px 5px; }
-    pre { padding: 14px; overflow-x: auto; }
-    li { margin: 8px 0; }
-  </style>
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SSHFling community package manifests</title></head>
 <body>
-  <h1>SSHFling 0.1.11 community package manifests</h1>
-  <p>SSHFling is proprietary commercial software. Installing, running, redistributing, or submitting these manifests to third-party repositories requires the rights described in the project LICENSE or a separate written agreement from GRWLX.</p>
-  <p>These files are generated from the release artifacts. Some ecosystems can install directly from these URLs; official/community repositories such as AUR, FreeBSD Ports, pkgsrc, winget, Chocolatey, Snapcraft, and distro repos still require maintainer account submission and review.</p>
+  <h1>SSHFling community package manifests</h1>
+  <p>These files are generated from the release artifacts. Some ecosystems can install directly from these URLs; official/community repositories still require maintainer account submission, signing, and review.</p>
+  <p>Dependency ownership remains with the target operating system. Trust model: review the generated manifest, verify checksums, and confirm the package-manager trust root before installation.</p>
   <ul>
     <li>Arch / AUR: <a href="arch/PKGBUILD">PKGBUILD</a>, <a href="arch/.SRCINFO">.SRCINFO</a></li>
     <li>Alpine: <a href="alpine/APKBUILD">APKBUILD</a></li>
-    <li>FreeBSD Ports: <a href="freebsd/security/sshfling/Makefile">security/sshfling port</a></li>
-    <li>OpenBSD Ports: <a href="openbsd/security/sshfling/Makefile">security/sshfling port</a></li>
-    <li>pkgsrc for NetBSD, DragonFly BSD, illumos, and SmartOS: <a href="pkgsrc/security/sshfling/Makefile">security/sshfling package</a></li>
-    <li>Nix: <a href="nix/flake.nix">flake.nix</a></li>
+    <li>FreeBSD Ports: <a href="freebsd/security/sshfling/">security/sshfling</a></li>
+    <li>OpenBSD Ports: <a href="openbsd/security/sshfling/">security/sshfling</a></li>
+    <li>pkgsrc: <a href="pkgsrc/security/sshfling/">security/sshfling</a></li>
+    <li>Nix / NixOS: <a href="nix/flake.nix">flake.nix</a></li>
     <li>Guix: <a href="guix/sshfling.scm">sshfling.scm</a></li>
-    <li>Void Linux: <a href="void/template">xbps-src template</a></li>
-    <li>Gentoo: <a href="gentoo/app-admin/sshfling/sshfling-0.1.11.ebuild">ebuild</a></li>
-    <li>Slackware: <a href="slackware/sshfling.SlackBuild">SlackBuild</a>, <a href="slackware/slack-desc">slack-desc</a></li>
-    <li>openSUSE OBS: <a href="opensuse/sshfling.spec">spec file</a></li>
+    <li>Void Linux: <a href="void/template">template</a></li>
+    <li>Gentoo: <a href="gentoo/app-admin/sshfling/sshfling-0.1.16.ebuild">ebuild</a></li>
+    <li>Slackware: <a href="slackware/sshfling.SlackBuild">SlackBuild</a></li>
+    <li>openSUSE / OBS: <a href="opensuse/sshfling.spec">spec</a></li>
     <li>Snapcraft: <a href="snap/snapcraft.yaml">snapcraft.yaml</a></li>
-    <li>Termux: <a href="termux/packages/sshfling/build.sh">package build.sh</a></li>
+    <li>Termux: <a href="termux/packages/sshfling/build.sh">build.sh</a></li>
     <li>AppImage: <a href="appimage/AppImageBuilder.yml">AppImageBuilder.yml</a></li>
-    <li>Scoop: <a href="scoop/sshfling.json">manifest</a></li>
-    <li>winget: <a href="winget/manifests/g/GRWLX/SSHFling/0.1.11/">multi-file manifest directory</a></li>
-    <li>Chocolatey: <a href="chocolatey/sshfling.0.1.11.nupkg">nupkg</a>, <a href="chocolatey/sshfling.nuspec">nuspec</a></li>
   </ul>
-  <h2>Fast Commands</h2>
-  <pre><code>curl -fsSLO https://grwlx.github.io/sshfling/arch/PKGBUILD &amp;&amp; makepkg -si
-scoop install https://grwlx.github.io/sshfling/scoop/sshfling.json
-irm https://grwlx.github.io/sshfling/chocolatey/install.ps1 | iex</code></pre>
 </body>
 </html>

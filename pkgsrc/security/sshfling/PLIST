@@ -1,12 +1,15 @@
 @comment $NetBSD$
 bin/sshfling
-libexec/sshfling-session
+libexec/sshfling/sshfling-unix-identity
 share/sshfling/templates/.env.example
 share/sshfling/templates/LICENSE
 share/sshfling/templates/README.md
 share/sshfling/templates/compose.client.yml
 share/sshfling/templates/compose.server.yml
+share/sshfling/templates/production/sshfling-login-shell
 share/sshfling/templates/production/sshfling-session
+share/sshfling/templates/native/sshfling-linux-account
+share/sshfling/templates/native/sshfling-unix-identity
 share/sshfling/templates/scripts/create-network.sh
 share/sshfling/templates/scripts/generate-ssh-key.sh
 share/sshfling/templates/scripts/install-local.sh
@@ -19,7 +22,9 @@ share/sshfling/templates/ssh-server/entrypoint.sh
 share/sshfling/templates/ssh-server/limited-session.sh
 share/sshfling/templates/ssh-server/sshd_config
 share/sshfling/templates/systemd/sshflingd.env.example
+share/sshfling/templates/systemd/sshfling-prune.service
+share/sshfling/templates/systemd/sshfling-prune.timer
 share/sshfling/templates/systemd/sshflingd.service
 share/doc/sshfling/LICENSE
 share/doc/sshfling/README.md
-etc/sshfling/policy.json
+share/examples/sshfling/policy.json

@@ -1,0 +1,83 @@
+RESULT	batch	source-version	PASS	0.1.16
+RESULT	batch	required-tools	PASS	python3=Python 3.12.3; tcl=8.6.14; awk=/usr/bin/awk; sed=/usr/bin/sed
+RESULT	tcl	package-archive	PASS	artifact=sshfling-tcl-0.1.16.tar.gz;sha256=957aa6c453b305aa9b753cfc42ec309c4afa0ab504657c749a6183fe1b26ef39;repeat_build=identical;source_date_epoch=0
+RESULT	tcl	package-require-runtime	PASS	package=0.1.16 runtime=sshfling-0.1.16
+RESULT	tcl	cli-version	PASS	sshfling 0.1.16
+RESULT	tcl	cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	tcl	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	tcl	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-tcl-0.1.16
+RESULT	tcl	removal-import	PASS	package-require-fails-after-removal
+RESULT	awk	package-archive	PASS	artifact=sshfling-awk-0.1.16.tar.gz;sha256=c909841cfc5456b550bf5d13b56f93168596265c63d40af6e0f2dfa07bacb66b;repeat_build=identical;source_date_epoch=0
+RESULT	awk	source-runtime	PASS	mawk-compatible-source-api; sshfling 0.1.16
+RESULT	awk	cli-version	PASS	sshfling 0.1.16
+RESULT	awk	cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	awk	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	awk	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-awk-0.1.16
+RESULT	awk	removal-source	PASS	source-file-absent
+RESULT	sed	package-archive	PASS	artifact=sshfling-sed-0.1.16.tar.gz;sha256=b5fef920cd664fb3c746f7bd9390567d0085abe7dfbf0449d1cd70ace8681c06;repeat_build=identical;source_date_epoch=0
+RESULT	sed	source-filter	PASS	input=sshfling 0.1.16 extracted=0.1.16 invalid-output=empty
+RESULT	sed	cli-version	PASS	sshfling 0.1.16
+RESULT	sed	cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	sed	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	sed	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-sed-0.1.16
+RESULT	sed	removal-source	PASS	sed-command-file-absent
+RESULT	lua	package-archive	PASS	artifact=sshfling-lua-0.1.16.tar.gz;sha256=2c9c90aa13dc0b9bf7aec5d3c2465b3bdcd128ca6e474d1e33704bba6d673854;repeat_build=identical;source_date_epoch=0
+RESULT	lua	lua5.1-source-runtime	PASS	require-version=0.1.16 runtime=sshfling-0.1.16
+RESULT	lua	lua5.1-source-init-assets	PASS	assets=24 executable-assets=11
+RESULT	lua	lua-5.1-luarocks-install	PASS	lua=5.1 require-version=0.1.16 runtime=sshfling-0.1.16
+RESULT	lua	lua-5.1-init-assets	PASS	assets=24 executable-assets=11
+RESULT	lua	luarocks-package	PASS	artifact=sshfling-0.1.16-1.all.rock;sha256=134cfd4ddb893486d16ef64bca8ecd7376112133002529472125cd2b44f66886;repeat_build=identical;container=zip;metadata=normalized;source_date_epoch=0
+RESULT	lua	lua-5.1-packed-rock-install	PASS	artifact=sshfling-0.1.16-1.all.rock require-version=0.1.16 runtime=sshfling-0.1.16
+RESULT	lua	lua-5.1-packed-rock-read-only-init	PASS	artifact=sshfling-0.1.16-1.all.rock read-only-package-tree assets=24 executable-assets=11
+RESULT	lua	lua-5.1-packed-rock-removal	PASS	packed-rock-module-and-cli-unavailable
+RESULT	lua	lua-5.1-removal	PASS	luarocks-remove; module-and-cli-unavailable
+RESULT	lua	lua5.4-source-runtime	PASS	require-version=0.1.16 runtime=sshfling-0.1.16
+RESULT	lua	lua5.4-source-init-assets	PASS	assets=24 executable-assets=11
+RESULT	lua	lua-5.4-luarocks-install	PASS	lua=5.4 require-version=0.1.16 runtime=sshfling-0.1.16
+RESULT	lua	lua-5.4-init-assets	PASS	assets=24 executable-assets=11
+RESULT	lua	lua-5.4-removal	PASS	luarocks-remove; module-and-cli-unavailable
+RESULT	lua	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	lua	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-lua-0.1.16
+RESULT	lua	removal-source	PASS	source-module-absent
+RESULT	zsh	package-archive	PASS	artifact=sshfling-zsh-0.1.16.tar.gz;sha256=341a3104c1537424f0fe335dbccf372dec98fd90224ecded4efa971b15d81e59;repeat_build=identical;source_date_epoch=0
+RESULT	zsh	package-cli-version	PASS	sshfling 0.1.16
+RESULT	zsh	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	zsh	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	zsh	source-runtime	PASS	zsh=zsh 5.9 (x86_64-ubuntu-linux-gnu); sshfling 0.1.16; init-assets=24
+RESULT	zsh	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-zsh-0.1.16
+RESULT	zsh	removal-source	PASS	source-module-absent
+RESULT	fish	package-archive	PASS	artifact=sshfling-fish-0.1.16.tar.gz;sha256=0f06d9031b05e8ac027ba479585c97cc08226b615159ee21c81f19e5602dfdf0;repeat_build=identical;source_date_epoch=0
+RESULT	fish	package-cli-version	PASS	sshfling 0.1.16
+RESULT	fish	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	fish	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	fish	source-runtime	PASS	fish=fish, version 3.7.0; sshfling 0.1.16; init-assets=24
+RESULT	fish	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-fish-0.1.16
+RESULT	fish	removal-source	PASS	source-module-absent
+RESULT	elvish	package-archive	PASS	artifact=sshfling-elvish-0.1.16.tar.gz;sha256=379e028ddbb4de2f81afffdd6100d1e8a7183e060a37d5edfdcf8613db138220;repeat_build=identical;source_date_epoch=0
+RESULT	elvish	package-cli-version	PASS	sshfling 0.1.16
+RESULT	elvish	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	elvish	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	elvish	source-runtime	PASS	sshfling 0.1.16; init-assets=24
+RESULT	elvish	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-elvish-0.1.16
+RESULT	elvish	removal-source	PASS	source-module-absent
+RESULT	nushell	package-archive	PASS	artifact=sshfling-nushell-0.1.16.tar.gz;sha256=237458fcab6c4b518a471020fa1b473451297517b99ed8df107dba2ceca1b45a;repeat_build=identical;source_date_epoch=0
+RESULT	nushell	package-cli-version	PASS	sshfling 0.1.16
+RESULT	nushell	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	nushell	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	nushell	source-runtime	SKIP	tool-not-found=nu
+RESULT	nushell	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-nushell-0.1.16
+RESULT	nushell	removal-source	PASS	source-module-absent
+RESULT	powershell	package-archive	PASS	artifact=sshfling-powershell-0.1.16.tar.gz;sha256=c2dce13d7bab762822d906d6e2c7fc41ddf3e8e9fdcd72b3331077c363688e0f;repeat_build=identical;source_date_epoch=0
+RESULT	powershell	package-cli-version	PASS	sshfling 0.1.16
+RESULT	powershell	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	powershell	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	powershell	source-runtime	SKIP	tool-not-found=pwsh
+RESULT	powershell	removal	PASS	isolated-prefix-absent=/workspace/project/tempSSh/build/scripting-languages/install/sshfling-powershell-0.1.16
+RESULT	powershell	removal-source	PASS	source-module-absent
+RESULT	powershell	manifest-source	PASS	archive-module-manifest=SSHFling.psd1 native-cli=bin/sshfling.ps1
+RESULT	guix-scheme	package-archive	PASS	artifact=sshfling-guix-scheme-0.1.16.tar.gz;sha256=4c6c362b58340d26b5a6b9fb2e5568ae4e3e957a4841642c272c359dc41aaac9;repeat_build=identical;source_date_epoch=0
+RESULT	guix-scheme	package-cli-version	PASS	sshfling 0.1.16
+RESULT	guix-scheme	package-cli-init-assets	PASS	assets=24 executable-assets=11 session-seconds=60
+RESULT	guix-scheme	symlink-cli-version	PASS	sshfling 0.1.16
+RESULT	guix-scheme	guile-runtime	PASS	sshfling 0.1.16; init-assets=24
+RESULT	guix-scheme	guix-definition	FAIL	exit=1 line=943 command=guix build --dry-run --no-substitutes -f "$package_prefix/sshfling-package.scm" > /dev/null

@@ -1,25 +1,30 @@
 pkgname=sshfling
-pkgver=0.1.11
+pkgver=0.1.16
 pkgrel=1
-pkgdesc="Temporary SSH certificate issuer and access CLI"
+pkgdesc="Temporary SSH access broker and CLI"
 arch=('any')
 url="https://grwlx.github.io/sshfling"
 license=('LicenseRef-SSHFling-Commercial')
-depends=('python' 'openssh' 'shadow' 'procps-ng' 'util-linux')
+depends=('bash' 'python' 'openssh' 'openssl' 'shadow' 'procps-ng' 'util-linux' 'jq')
 optdepends=('docker: Docker Compose test harness')
 backup=('etc/sshfling/policy.json')
-source=("${pkgname}-${pkgver}.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz")
-sha256sums=('324db74ac9f35977c89fe2922ace7609251915fc2e9b67e468d8f56e6f4ecef8')
+source=("${pkgname}-${pkgver}.tar.gz::https://grwlx.github.io/sshfling/downloads/sshfling-0.1.16.tar.gz")
+sha256sums=('78feb8fcc0344c9da3dfd1ef5305e9637dbd359749df1fcd6c51ed7ee961d4c4')
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
   install -Dm755 bin/sshfling "${pkgdir}/usr/bin/sshfling"
+  install -Dm755 native/sshfling-linux-account "${pkgdir}/usr/libexec/sshfling/sshfling-linux-account"
+  install -Dm755 native/sshfling-unix-identity "${pkgdir}/usr/libexec/sshfling/sshfling-unix-identity"
+  install -Dm755 production/sshfling-login-shell "${pkgdir}/usr/share/sshfling/templates/production/sshfling-login-shell"
   install -Dm755 production/sshfling-session "${pkgdir}/usr/share/sshfling/templates/production/sshfling-session"
   install -Dm644 packaging/policy.json "${pkgdir}/etc/sshfling/policy.json"
   install -Dm644 systemd/sshflingd.service "${pkgdir}/usr/lib/systemd/system/sshflingd.service"
+  install -Dm644 systemd/sshfling-prune.service "${pkgdir}/usr/lib/systemd/system/sshfling-prune.service"
+  install -Dm644 systemd/sshfling-prune.timer "${pkgdir}/usr/lib/systemd/system/sshfling-prune.timer"
   install -Dm644 systemd/sshflingd.env.example "${pkgdir}/usr/share/doc/sshfling/sshflingd.env.example"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/sshfling/LICENSE"
   install -Dm644 README.md "${pkgdir}/usr/share/doc/sshfling/README.md"
   install -d "${pkgdir}/usr/share/sshfling/templates"
-  cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml scripts secrets ssh-client ssh-server production systemd "${pkgdir}/usr/share/sshfling/templates/"
+  cp -a .env.example LICENSE README.md compose.server.yml compose.client.yml native scripts secrets ssh-client ssh-server production systemd "${pkgdir}/usr/share/sshfling/templates/"
 }

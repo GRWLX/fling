@@ -1,8 +1,8 @@
-sshfling: sshfling (temporary SSH certificate issuer)
+sshfling: sshfling (temporary SSH access broker)
 sshfling:
-sshfling: SSHFling issues short-lived OpenSSH user certificates and installs
-sshfling: a forced session wrapper so temporary SSH sessions are capped by a
-sshfling: server-side wall-clock timeout.
+sshfling: SSHFling grants short-lived SSH access with default password grants,
+sshfling: optional OpenSSH user certificates, and a forced session wrapper so
+sshfling: temporary SSH sessions are capped by a server-side wall-clock timeout.
 sshfling:
 sshfling: Homepage: https://grwlx.github.io/sshfling/
 sshfling:

@@ -1,11 +1,11 @@
 name: sshfling
 base: core24
-version: '0.1.11'
-summary: Temporary SSH certificate issuer and access CLI
+version: '0.1.16'
+summary: Temporary SSH access broker and CLI
 description: |
-  SSHFling issues short-lived OpenSSH user certificates and installs a forced
-  session wrapper so temporary SSH sessions are capped by a server-side
-  wall-clock timeout.
+  SSHFling grants short-lived SSH access with default password grants, optional
+  OpenSSH user certificates, and a forced session wrapper so temporary SSH
+  sessions are capped by a server-side wall-clock timeout.
 license: Proprietary
 grade: stable
 confinement: classic
@@ -15,13 +15,16 @@ apps:
     command: bin/sshfling
     environment:
       SSHFLING_TEMPLATE_DIR: $SNAP/share/sshfling/templates
+      SSHFLING_LINUX_ACCOUNT_HELPER: $SNAP/share/sshfling/templates/native/sshfling-linux-account
+      SSHFLING_UNIX_IDENTITY_HELPER: $SNAP/share/sshfling/templates/native/sshfling-unix-identity
 
 parts:
   sshfling:
     plugin: dump
-    source: https://grwlx.github.io/sshfling/downloads/sshfling-0.1.11.tar.gz
+    source: https://grwlx.github.io/sshfling/downloads/sshfling-0.1.16.tar.gz
     organize:
       bin/sshfling: bin/sshfling
+      native: share/sshfling/templates/native
       .env.example: share/sshfling/templates/.env.example
       LICENSE: share/sshfling/templates/LICENSE
       README.md: share/sshfling/templates/README.md
@@ -34,6 +37,9 @@ parts:
       production: share/sshfling/templates/production
       systemd: share/sshfling/templates/systemd
     stage-packages:
+      - bash
+      - jq
+      - openssl
       - python3
       - openssh-client
       - passwd
