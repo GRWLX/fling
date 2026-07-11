@@ -28,7 +28,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "0.1.20"
+VERSION = "0.1.21"
 DEFAULT_NETWORK = "timed-ssh-net"
 DEFAULT_SESSION_WRAPPER = "/usr/local/libexec/sshfling-session"
 DEFAULT_ISSUER_LISTEN = "127.0.0.1:8787"
@@ -3065,6 +3065,8 @@ def _cmd_setup_certificate_locked(args):
 
 
 def cmd_setup_certificate(args):
+    if not getattr(args, "certificate", False):
+        raise SSHFlingError("Certificate setup requires --certificate.", 2)
     require_root("temporary SSH access")
     with grant_state_lock(args.session_dir):
         return _cmd_setup_certificate_locked(args)

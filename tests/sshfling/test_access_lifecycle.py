@@ -221,7 +221,7 @@ except module.SSHFlingError as exc:
         self.patch("_cmd_cert_prune_locked", lambda args: events.append(("certificate-prune", args.session_dir)) or 0)
 
         password_args = argparse.Namespace(password_grant_dir="/state/password-grants")
-        certificate_args = argparse.Namespace(session_dir="/state/sessions")
+        certificate_args = argparse.Namespace(certificate=True, session_dir="/state/sessions")
         self.sshfling.cmd_setup_password(password_args)
         self.sshfling.cmd_password_prune(password_args)
         self.sshfling.cmd_setup_certificate(certificate_args)

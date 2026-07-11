@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.21 - 2026-07-11
+
+Status: language-catalog publication candidate after `v0.1.20` exposed a
+non-root hosted-runner branch in cross-OS CLI validation.
+
+### Fixed
+
+- Report missing `--certificate` before root privilege checks for direct
+  certificate setup calls, making the CLI error deterministic across root and
+  non-root validation hosts.
+- Bumped language package and evidence references to `0.1.21` for a
+  fixed-forward language artifact publication without moving `v0.1.20`.
+
 ## v0.1.20 - 2026-07-11
 
 Status: language-catalog publication candidate after `v0.1.19` exposed a
