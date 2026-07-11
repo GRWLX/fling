@@ -66,6 +66,19 @@ if ! command -v bal >/dev/null 2>&1 || ! bal version 2>/dev/null | grep -F "Ball
   install_deb "$ballerina_deb"
 fi
 
+if ! command -v raku >/dev/null 2>&1; then
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    apt-get update >&2
+    apt-get install -y --no-install-recommends raku >&2
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update >&2
+    sudo apt-get install -y --no-install-recommends raku >&2
+  else
+    echo "sudo or root privileges are required to install raku" >&2
+    exit 1
+  fi
+fi
+
 chapel_deb="$download_dir/chapel-2.4.0-1.ubuntu24.amd64.deb"
 download \
   "https://github.com/chapel-lang/chapel/releases/download/2.4.0/chapel-2.4.0-1.ubuntu24.amd64.deb" \

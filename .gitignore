@@ -19,6 +19,7 @@ id_ed25519
 known_hosts
 .pytest_cache/
 .mypy_cache/
+.precomp/
 node_modules/
 .gradle/
 .coverage

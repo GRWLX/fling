@@ -194,8 +194,8 @@ def load_languages() -> list[Language]:
                         bundle=row["bundle"],
                     )
                 )
-    if len(languages) != 20:
-        raise ValidationFailure(f"expected 20 language records, found {len(languages)}")
+    if len(languages) != 21:
+        raise ValidationFailure(f"expected 21 language records, found {len(languages)}")
     for group, declared in declared_by_group.items():
         actual = {path.name for path in group.iterdir() if path.is_dir()}
         if actual != declared:
@@ -448,6 +448,29 @@ def validate_contract(language: Language, canonical_files: set[str]) -> str:
         )
         if not os.access(root / "bin/sshfling-ring", os.X_OK) or "exit \"$status\"" not in launcher:
             raise ValidationFailure("ring: POSIX status wrapper is not executable/complete")
+    elif identifier == "raku":
+        metadata = require_json(root / "META6.json")
+        if (
+            metadata.get("name") != "SSHFling"
+            or metadata.get("version") != "0.0.0"
+            or metadata.get("provides", {}).get("SSHFling") != "lib/SSHFling.rakumod"
+            or "runtime" not in metadata.get("resources", [])
+        ):
+            raise ValidationFailure("raku: package identity/assets contract is invalid")
+        api = require_tokens(
+            root / "lib/SSHFling.rakumod",
+            "unit module SSHFling",
+            "sub package-version",
+            "sub runtime-path",
+            "sub template-directory",
+            "sub run(@arguments --> Int) is export",
+            "Proc::Async.new($python, $runtime, |@arguments)",
+            "return 127 unless $runtime.IO.f",
+        )
+        if "shell " in api or "run @arguments" in api:
+            raise ValidationFailure("raku: package must use argv-array process execution")
+        require_tokens(root / "bin/sshfling-raku", "use SSHFling", "exit run(@*ARGS)")
+        require_tokens(root / "test/consumer.raku", "use SSHFling", "exit run(@*ARGS)")
     elif identifier == "apl":
         metadata = require_json(root / "apl-package.json")
         if (
@@ -1587,6 +1610,53 @@ class PackageRunner:
         )
         self.check("package-removed", not source.exists(), f"path={source}")
 
+    def validate_raku(self) -> None:
+        self.probe("raku-version", [self.tools["raku"], "--version"])
+        archive = self.source_archive()
+        source = extract_single_root(archive, self.work / "source with spaces")
+        self.verify_runtime(source / "runtime")
+
+        unrelated = self.work / "unrelated-cwd"
+        unrelated.mkdir()
+        consumer = self.work / "external-consumer.raku"
+        consumer.write_text(
+            f"use lib {json.dumps(str(source / 'lib'))};\n"
+            "use SSHFling;\n"
+            "exit run(@*ARGS);\n",
+            encoding="utf-8",
+        )
+        command = lambda args: [self.tools["raku"], consumer, *args]
+        self.run_status_cases(command, cwd=unrelated)
+        self.command(
+            "consumer-argument-boundaries",
+            command(["--version", "space value", "semi;colon", "quote'\"value"]),
+            cwd=unrelated,
+        )
+        zero = self.command("consumer-zero-arguments", command([]), cwd=unrelated, expected={0, 2})
+        self.check(
+            "zero-argument-status",
+            zero.returncode in {0, 2},
+            f"status={zero.returncode};stdout_bytes={len(zero.stdout)};stderr_bytes={len(zero.stderr)}",
+        )
+        cli = source / "bin/sshfling-raku"
+        cli_result = self.command("installed-cli-version", [cli, "--version"], cwd=unrelated)
+        self.assert_version_output(cli_result)
+        packaged = self.command(
+            "packaged-consumer-version",
+            [self.tools["raku"], "-I", source / "lib", source / "test/consumer.raku", "--version"],
+            cwd=unrelated,
+        )
+        self.assert_version_output(packaged)
+
+        shutil.rmtree(source)
+        self.check("package-removed", not source.exists(), f"path={source}")
+        self.command(
+            "import-absence",
+            [self.tools["raku"], consumer, "--version"],
+            cwd=unrelated,
+            expected=lambda status: status != 0,
+        )
+
     def write_apl_status_wrapper(self, path: Path, source: Path, consumer: Path, package_root: Path) -> None:
         apl = shlex.quote(self.tools["apl"])
         source_arg = shlex.quote(str(source))
@@ -2410,6 +2480,7 @@ TOOL_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "roc": ("roc",),
     "janet": ("janet", "jpm"),
     "ring": ("ring",),
+    "raku": ("raku",),
     "apl": ("apl",),
     "j": ("jconsole",),
     "julia": ("julia",),
@@ -2427,6 +2498,7 @@ NATIVE_RUNNERS = {
     "haskell",
     "janet",
     "ring",
+    "raku",
     "apl",
     "ballerina",
     "roc",

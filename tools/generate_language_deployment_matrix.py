@@ -2247,6 +2247,34 @@ DEPLOYMENTS.append(
     )
 )
 
+DEPLOYMENTS.append(
+    validated_batch_package(
+        "raku-meta6-library",
+        "Raku",
+        "META6/source archive",
+        "Raku module and command package",
+        "library + CLI",
+        "sshfling-raku-VERSION.tar.gz",
+        "package-functional-languages",
+        "packaging/functional-languages/raku",
+        [
+            "packaging/functional-languages/raku/META6.json",
+            "packaging/functional-languages/raku/lib/SSHFling.rakumod",
+            "packaging/functional-languages/raku/bin/sshfling-raku",
+            "packaging/functional-languages/raku/test/consumer.raku",
+            "packaging/build-functional-languages.py",
+            "tools/provision-promoted-language-runtimes.sh",
+            "tools/validate_promoted_language_evidence.py",
+        ],
+        "META6.json declares the package identity, provided SSHFling module, command wrapper, and bundled runtime resource boundary.",
+        "The functional-language validator extracts the deterministic archive and executes a clean external Raku consumer from an unrelated directory.",
+        "The staged source package contains Raku module source, command wrapper, consumer script, license, README, and the byte-checked canonical runtime bundle.",
+        "A separate Raku consumer imports the extracted module via an explicit lib path outside the source checkout.",
+        "SSHFling.run accepts a Raku argument list and delegates through Proc::Async without shell string expansion.",
+        "The consumer and command validate argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence.",
+    )
+)
+
 
 FIRST_91_CATALOG: tuple[tuple[str, str], ...] = (
     ("Python", "PASS"),

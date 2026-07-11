@@ -6,7 +6,7 @@ and artifact boundary. Maven and Gradle are separate JVM deployments, and real
 importable library surfaces are named rather than inferred from language names.
 
 Catalog outcomes: **70 PASS**, **5 BLOCKED**, and **16 NOT_APPLICABLE**. The catalog expands to **144 explicit surface cells** (123 PASS, 5 BLOCKED, 16 NOT_APPLICABLE).
-Fully implemented runtime deployments retain **768 detailed PASS cells** across **96 surfaces**, including **79 validated library-capable surfaces**.
+Fully implemented runtime deployments retain **776 detailed PASS cells** across **97 surfaces**, including **80 validated library-capable surfaces**.
 
 A source-archive publication PASS proves deterministic archive creation and inventory
 only. It is deliberately separate from install, library-consumer, CLI, and runtime
@@ -267,6 +267,7 @@ These surfaces alone receive the detailed eight-check lifecycle grid.
 | apl-gnu-package | APL | GNU APL | GNU APL source package | library | sshfling-apl-VERSION.tar.gz | `package-functional-languages` |
 | matlab-octave-package | MATLAB | GNU Octave | MATLAB-compatible source package | library | sshfling-matlab-VERSION.tar.gz | `package-functional-languages` |
 | wolfram-language-mathics-package | Wolfram Language | Mathics3 | Mathics-compatible source package | library | sshfling-wolfram-language-VERSION.tar.gz | `package-functional-languages` |
+| raku-meta6-library | Raku | META6/source archive | Raku module and command package | library + CLI | sshfling-raku-VERSION.tar.gz | `package-functional-languages` |
 
 ## Detailed Eight-Check Verification Cells
 
@@ -1040,3 +1041,11 @@ These surfaces alone receive the detailed eight-check lifecycle grid.
 | LD-96-06 | Wolfram Language | Mathics3 | Mathics-compatible source package | library | Public interface | PASS | SSHFling`RunSSHFling accepts a Wolfram string list, hex-encodes arguments for the packaged runner bridge, and returns the canonical runtime status. |
 | LD-96-07 | Wolfram Language | Mathics3 | Mathics-compatible source package | library | Version contract | PASS | The focused Wolfram Language consumer must print the exact SSHFling release version. |
 | LD-96-08 | Wolfram Language | Mathics3 | Mathics-compatible source package | library | Runtime assets/workflow | PASS | The consumer validates argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence. |
+| LD-97-01 | Raku | META6/source archive | Raku module and command package | library + CLI | Source surface | PASS | Tracked Raku package sources and its public surface live under packaging/functional-languages/raku. |
+| LD-97-02 | Raku | META6/source archive | Raku module and command package | library + CLI | Package metadata | PASS | META6.json declares the package identity, provided SSHFling module, command wrapper, and bundled runtime resource boundary. |
+| LD-97-03 | Raku | META6/source archive | Raku module and command package | library + CLI | Package build | PASS | The functional-language validator extracts the deterministic archive and executes a clean external Raku consumer from an unrelated directory. |
+| LD-97-04 | Raku | META6/source archive | Raku module and command package | library + CLI | Artifact contents | PASS | The staged source package contains Raku module source, command wrapper, consumer script, license, README, and the byte-checked canonical runtime bundle. |
+| LD-97-05 | Raku | META6/source archive | Raku module and command package | library + CLI | Isolated consumer | PASS | A separate Raku consumer imports the extracted module via an explicit lib path outside the source checkout. |
+| LD-97-06 | Raku | META6/source archive | Raku module and command package | library + CLI | Public interface | PASS | SSHFling.run accepts a Raku argument list and delegates through Proc::Async without shell string expansion. |
+| LD-97-07 | Raku | META6/source archive | Raku module and command package | library + CLI | Version contract | PASS | The focused Raku consumer must print the exact SSHFling release version. |
+| LD-97-08 | Raku | META6/source archive | Raku module and command package | library + CLI | Runtime assets/workflow | PASS | The consumer and command validate argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence. |

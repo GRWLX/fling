@@ -1,0 +1,4 @@
+use lib $?FILE.IO.parent.parent.add("lib").Str;
+use SSHFling;
+
+exit run(@*ARGS);
