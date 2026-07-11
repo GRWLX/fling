@@ -194,8 +194,8 @@ def load_languages() -> list[Language]:
                         bundle=row["bundle"],
                     )
                 )
-    if len(languages) != 21:
-        raise ValidationFailure(f"expected 21 language records, found {len(languages)}")
+    if len(languages) != 22:
+        raise ValidationFailure(f"expected 22 language records, found {len(languages)}")
     for group, declared in declared_by_group.items():
         actual = {path.name for path in group.iterdir() if path.is_dir()}
         if actual != declared:
@@ -471,6 +471,37 @@ def validate_contract(language: Language, canonical_files: set[str]) -> str:
             raise ValidationFailure("raku: package must use argv-array process execution")
         require_tokens(root / "bin/sshfling-raku", "use SSHFling", "exit run(@*ARGS)")
         require_tokens(root / "test/consumer.raku", "use SSHFling", "exit run(@*ARGS)")
+    elif identifier == "haxe":
+        metadata = require_json(root / "haxelib.json")
+        if (
+            metadata.get("name") != "sshfling"
+            or metadata.get("version") != "0.0.0"
+            or metadata.get("classPath") != "src"
+            or "ssh" not in metadata.get("tags", [])
+        ):
+            raise ValidationFailure("haxe: package identity/classPath contract is invalid")
+        require_tokens(root / "build.hxml", "-cp src", "-main Main", "-neko bin/sshfling-haxe.n")
+        api = require_tokens(
+            root / "src/sshfling/SSHFling.hx",
+            "class SSHFling",
+            'packageVersion:String = "0.0.0"',
+            "PackageRootMacro.sourcePackageRoot()",
+            "public static function runtimePath():String",
+            "public static function templateDirectory():String",
+            "public static function run(arguments:Array<String>):Int",
+            "Sys.command(command, commandArguments)",
+            "return 127",
+        )
+        if "Sys.command(command + " in api:
+            raise ValidationFailure("haxe: package must use argv-array process execution")
+        require_tokens(
+            root / "src/sshfling/PackageRootMacro.hx",
+            "public static macro function sourcePackageRoot()",
+            "Context.getPosInfos",
+            "sys.FileSystem.fullPath",
+        )
+        require_tokens(root / "src/Main.hx", "import sshfling.SSHFling", "SSHFling.run(Sys.args())")
+        require_tokens(root / "test/Consumer.hx", "import sshfling.SSHFling", "SSHFling.run(Sys.args())")
     elif identifier == "apl":
         metadata = require_json(root / "apl-package.json")
         if (
@@ -1657,6 +1688,100 @@ class PackageRunner:
             expected=lambda status: status != 0,
         )
 
+    def validate_haxe(self) -> None:
+        self.probe("haxe-version", [self.tools["haxe"], "--version"])
+        self.probe("neko-version", [self.tools["neko"], "-version"])
+        self.probe("haxelib-version", [self.tools["haxelib"], "version"])
+        archive = self.source_archive()
+        source = extract_single_root(archive, self.work / "source with spaces")
+        self.verify_runtime(source / "runtime")
+
+        haxelib_repo = self.work / "haxelib-repo"
+        self.command("haxelib-setup", [self.tools["haxelib"], "setup", haxelib_repo], cwd=self.work)
+        self.command("haxelib-dev-package", [self.tools["haxelib"], "dev", "sshfling", source], cwd=self.work)
+        self.command("haxelib-path", [self.tools["haxelib"], "path", "sshfling"], cwd=self.work)
+
+        source_bin = source / "bin"
+        source_bin.mkdir(exist_ok=True)
+        self.command("haxe-build-cli", [self.tools["haxe"], "build.hxml"], cwd=source)
+        cli = source_bin / "sshfling-haxe.n"
+        cli_result = self.command("installed-cli-version", [self.tools["neko"], cli, "--version"], cwd=self.work)
+        self.assert_version_output(cli_result)
+
+        unrelated = self.work / "unrelated-cwd"
+        unrelated.mkdir()
+        consumer_dir = self.work / "external-consumer"
+        consumer_dir.mkdir()
+        consumer = consumer_dir / "Consumer.hx"
+        consumer.write_text(
+            "import sshfling.SSHFling;\n"
+            "\n"
+            "class Consumer {\n"
+            "  static function main():Void {\n"
+            "    Sys.exit(SSHFling.run(Sys.args()));\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        consumer_neko = self.work / "consumer.n"
+        compile_consumer = [
+            self.tools["haxe"],
+            "-lib",
+            "sshfling",
+            "-cp",
+            consumer_dir,
+            "-main",
+            "Consumer",
+            "-neko",
+            consumer_neko,
+        ]
+        self.command("external-consumer-build", compile_consumer, cwd=unrelated)
+        command = lambda args: [self.tools["neko"], consumer_neko, *args]
+        self.run_status_cases(command, cwd=unrelated)
+        self.command(
+            "consumer-argument-boundaries",
+            command(["--version", "space value", "semi;colon", "quote'\"value"]),
+            cwd=unrelated,
+        )
+        zero = self.command("consumer-zero-arguments", command([]), cwd=unrelated, expected={0, 2})
+        self.check(
+            "zero-argument-status",
+            zero.returncode in {0, 2},
+            f"status={zero.returncode};stdout_bytes={len(zero.stdout)};stderr_bytes={len(zero.stderr)}",
+        )
+
+        packaged_consumer = self.work / "packaged-consumer.n"
+        self.command(
+            "packaged-consumer-build",
+            [
+                self.tools["haxe"],
+                "-lib",
+                "sshfling",
+                "-cp",
+                source / "test",
+                "-main",
+                "Consumer",
+                "-neko",
+                packaged_consumer,
+            ],
+            cwd=unrelated,
+        )
+        packaged = self.command(
+            "packaged-consumer-version",
+            [self.tools["neko"], packaged_consumer, "--version"],
+            cwd=unrelated,
+        )
+        self.assert_version_output(packaged)
+
+        shutil.rmtree(source)
+        self.check("package-removed", not source.exists(), f"path={source}")
+        self.command(
+            "import-absence",
+            compile_consumer,
+            cwd=unrelated,
+            expected=lambda status: status != 0,
+        )
+
     def write_apl_status_wrapper(self, path: Path, source: Path, consumer: Path, package_root: Path) -> None:
         apl = shlex.quote(self.tools["apl"])
         source_arg = shlex.quote(str(source))
@@ -2481,6 +2606,7 @@ TOOL_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "janet": ("janet", "jpm"),
     "ring": ("ring",),
     "raku": ("raku",),
+    "haxe": ("haxe", "neko", "haxelib"),
     "apl": ("apl",),
     "j": ("jconsole",),
     "julia": ("julia",),
@@ -2499,6 +2625,7 @@ NATIVE_RUNNERS = {
     "janet",
     "ring",
     "raku",
+    "haxe",
     "apl",
     "ballerina",
     "roc",

@@ -21,6 +21,7 @@ FUNCTIONAL_LANGUAGES = (
     "matlab",
     "wolfram-language",
     "raku",
+    "haxe",
 )
 SCRIPTING_LANGUAGES = ("guix-scheme",)
 SCRIPTING_LIFECYCLE_PHASES = (

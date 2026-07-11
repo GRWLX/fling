@@ -6,7 +6,7 @@ and artifact boundary. Maven and Gradle are separate JVM deployments, and real
 importable library surfaces are named rather than inferred from language names.
 
 Catalog outcomes: **70 PASS**, **5 BLOCKED**, and **16 NOT_APPLICABLE**. The catalog expands to **144 explicit surface cells** (123 PASS, 5 BLOCKED, 16 NOT_APPLICABLE).
-Fully implemented runtime deployments retain **776 detailed PASS cells** across **97 surfaces**, including **80 validated library-capable surfaces**.
+Fully implemented runtime deployments retain **784 detailed PASS cells** across **98 surfaces**, including **81 validated library-capable surfaces**.
 
 A source-archive publication PASS proves deterministic archive creation and inventory
 only. It is deliberately separate from install, library-consumer, CLI, and runtime
@@ -268,6 +268,7 @@ These surfaces alone receive the detailed eight-check lifecycle grid.
 | matlab-octave-package | MATLAB | GNU Octave | MATLAB-compatible source package | library | sshfling-matlab-VERSION.tar.gz | `package-functional-languages` |
 | wolfram-language-mathics-package | Wolfram Language | Mathics3 | Mathics-compatible source package | library | sshfling-wolfram-language-VERSION.tar.gz | `package-functional-languages` |
 | raku-meta6-library | Raku | META6/source archive | Raku module and command package | library + CLI | sshfling-raku-VERSION.tar.gz | `package-functional-languages` |
+| haxe-haxelib-neko-package | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | sshfling-haxe-VERSION.tar.gz | `package-functional-languages` |
 
 ## Detailed Eight-Check Verification Cells
 
@@ -1049,3 +1050,11 @@ These surfaces alone receive the detailed eight-check lifecycle grid.
 | LD-97-06 | Raku | META6/source archive | Raku module and command package | library + CLI | Public interface | PASS | SSHFling.run accepts a Raku argument list and delegates through Proc::Async without shell string expansion. |
 | LD-97-07 | Raku | META6/source archive | Raku module and command package | library + CLI | Version contract | PASS | The focused Raku consumer must print the exact SSHFling release version. |
 | LD-97-08 | Raku | META6/source archive | Raku module and command package | library + CLI | Runtime assets/workflow | PASS | The consumer and command validate argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence. |
+| LD-98-01 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Source surface | PASS | Tracked Haxe package sources and its public surface live under packaging/functional-languages/haxe. |
+| LD-98-02 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Package metadata | PASS | haxelib.json declares the package identity, source class path, Haxe package metadata, and bundled runtime boundary. |
+| LD-98-03 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Package build | PASS | The functional-language validator extracts the deterministic archive, builds the Neko command target, and compiles a clean external Haxe consumer. |
+| LD-98-04 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Artifact contents | PASS | The staged source package contains Haxe module source, macro source, hxml build metadata, consumer source, license, README, and the byte-checked canonical runtime bundle. |
+| LD-98-05 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Isolated consumer | PASS | A separate Haxe consumer imports the extracted sshfling package via an explicit source path outside the source checkout. |
+| LD-98-06 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Public interface | PASS | SSHFling.run accepts a Haxe string array and delegates through Sys.command(command, args) without shell string construction. |
+| LD-98-07 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Version contract | PASS | The focused Haxe consumer must print the exact SSHFling release version. |
+| LD-98-08 | Haxe | haxelib/Neko | Haxe library and Neko command package | library + CLI | Runtime assets/workflow | PASS | The consumer and command validate argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence. |

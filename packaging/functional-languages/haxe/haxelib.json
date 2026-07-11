@@ -1,0 +1,11 @@
+{
+  "name": "sshfling",
+  "url": "https://github.com/GRWLX/sshfling",
+  "license": "MIT",
+  "tags": ["ssh", "cli", "runtime"],
+  "description": "Haxe library and Neko command wrapper for the SSHFling runtime.",
+  "version": "0.0.0",
+  "classPath": "src",
+  "releasenote": "Initial source package.",
+  "contributors": ["GRWLX"]
+}

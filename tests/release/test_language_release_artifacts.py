@@ -229,11 +229,11 @@ class LanguageReleaseArtifactTests(unittest.TestCase):
         all_files = inventory("all")
 
         self.assertEqual(len(scripting), 12)
-        self.assertEqual(len(functional), 22)
+        self.assertEqual(len(functional), 23)
         self.assertEqual(len(systems), 20)
         self.assertEqual(catalog, functional + systems)
         self.assertEqual(all_files, scripting + catalog)
-        self.assertEqual(len(all_files), 54)
+        self.assertEqual(len(all_files), 55)
         self.assertEqual(len(all_files), len(set(all_files)))
         self.assertTrue(all(VERSION in name for name in all_files))
 
@@ -243,6 +243,7 @@ class LanguageReleaseArtifactTests(unittest.TestCase):
             f"sshfling-haskell-{VERSION}.tar.gz",
             f"sshfling-julia-{VERSION}.tar.gz",
             f"sshfling-raku-{VERSION}.tar.gz",
+            f"sshfling-haxe-{VERSION}.tar.gz",
             f"sshfling-erlang-{VERSION}.tar.gz",
             f"sshfling-swift-{VERSION}.tar.gz",
             f"sshfling-webassembly-wasi-{VERSION}.tar.gz",

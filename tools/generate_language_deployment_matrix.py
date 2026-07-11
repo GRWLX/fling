@@ -2275,6 +2275,36 @@ DEPLOYMENTS.append(
     )
 )
 
+DEPLOYMENTS.append(
+    validated_batch_package(
+        "haxe-haxelib-neko-package",
+        "Haxe",
+        "haxelib/Neko",
+        "Haxe library and Neko command package",
+        "library + CLI",
+        "sshfling-haxe-VERSION.tar.gz",
+        "package-functional-languages",
+        "packaging/functional-languages/haxe",
+        [
+            "packaging/functional-languages/haxe/haxelib.json",
+            "packaging/functional-languages/haxe/build.hxml",
+            "packaging/functional-languages/haxe/src/sshfling/SSHFling.hx",
+            "packaging/functional-languages/haxe/src/sshfling/PackageRootMacro.hx",
+            "packaging/functional-languages/haxe/src/Main.hx",
+            "packaging/functional-languages/haxe/test/Consumer.hx",
+            "packaging/build-functional-languages.py",
+            "tools/provision-promoted-language-runtimes.sh",
+            "tools/validate_promoted_language_evidence.py",
+        ],
+        "haxelib.json declares the package identity, source class path, Haxe package metadata, and bundled runtime boundary.",
+        "The functional-language validator extracts the deterministic archive, builds the Neko command target, and compiles a clean external Haxe consumer.",
+        "The staged source package contains Haxe module source, macro source, hxml build metadata, consumer source, license, README, and the byte-checked canonical runtime bundle.",
+        "A separate Haxe consumer imports the extracted sshfling package via an explicit source path outside the source checkout.",
+        "SSHFling.run accepts a Haxe string array and delegates through Sys.command(command, args) without shell string construction.",
+        "The consumer and command validate argument boundaries, version, init, invalid option, missing runtime, package removal, and import absence.",
+    )
+)
+
 
 FIRST_91_CATALOG: tuple[tuple[str, str], ...] = (
     ("Python", "PASS"),

@@ -10,3 +10,4 @@ roc	Roc	roc	roc	roc	package.roc,main.roc	SSHFling.roc	test/consumer.roc	runtime
 janet	Janet	janet+jpm	janet	janet	project.janet	src/sshfling/init.janet	test/consumer.janet	runtime
 ring	Ring	ring	ring	ring	package.ring	lib.ring	test/consumer.ring	runtime
 raku	Raku	raku	raku	raku	META6.json	lib/SSHFling.rakumod	test/consumer.raku	runtime
+haxe	Haxe	haxe+neko+haxelib	haxe	haxe	haxelib.json,build.hxml	src/sshfling/SSHFling.hx,src/sshfling/PackageRootMacro.hx,src/Main.hx	test/Consumer.hx	runtime

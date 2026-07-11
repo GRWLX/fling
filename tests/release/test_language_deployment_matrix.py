@@ -213,6 +213,7 @@ class LanguageDeploymentMatrixTests(unittest.TestCase):
             "PowerShell",
             "Ring",
             "Raku",
+            "Haxe",
         ):
             self.assertTrue(
                 any(item["language"] == language for item in library_surfaces),
