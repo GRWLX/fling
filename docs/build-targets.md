@@ -62,6 +62,11 @@ These files are generated into the public package site. Some can be used directl
 | winget | `winget/manifests/.../SSHFling/...` |
 | Chocolatey | `chocolatey/sshfling.VERSION.nupkg`, `chocolatey/sshfling.nuspec` |
 
+Generated package files and manifests are release inputs. They do not mean
+SSHFling is accepted into Debian, Ubuntu, Fedora, EPEL, or another distro-owned
+repository. Track official Debian/Ubuntu/Fedora/EPEL readiness in
+[official-distro-readiness.md](official-distro-readiness.md).
+
 ## Platform Coverage Evidence Expectations
 
 The tables above describe artifacts and generated packaging metadata, not a

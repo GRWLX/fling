@@ -360,7 +360,8 @@ remove the extracted directory and any PATH entries added by your deployment.
 The package site generates community manifests, but official ecosystem
 publication still requires ecosystem-specific maintainership, review, signing,
 and license acceptance. Treat generated files as release inputs, not automatic
-publication.
+publication. Debian, Ubuntu, Fedora, and EPEL readiness is tracked separately in
+[`docs/official-distro-readiness.md`](../official-distro-readiness.md).
 
 Before submitting to a third-party repository:
 

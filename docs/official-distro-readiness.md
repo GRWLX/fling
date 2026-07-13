@@ -1,0 +1,31 @@
+# Official Distro Repository Readiness
+
+This evidence is for publication through official Debian, Ubuntu, Fedora, and EPEL repositories. It is separate from the upstream signed APT/DNF repository.
+
+Status meanings:
+
+- `PASS`: sufficient evidence exists for this readiness item.
+- `WARN`: usable for upstream packaging, but not enough for official archive submission.
+- `BLOCKED`: do not submit to the official archive until resolved.
+
+| Area | Status | Evidence | Required next action |
+| --- | --- | --- | --- |
+| License | BLOCKED | LICENSE declares SSHFling proprietary, not open source, paid-use, and redistribution-restricted. | Choose an OSI/DFSG/Fedora-acceptable open-source license or obtain a distro-specific redistribution grant before official archive submission. |
+| Debian/Ubuntu source packaging | BLOCKED | Missing official source package files: debian/control, debian/rules, debian/changelog, debian/copyright, debian/source/format. | Create a policy-compliant debian/ source package, build with dpkg-buildpackage, and validate with lintian/autopkgtest before mentors.debian.net or Ubuntu sponsorship. |
+| Generated DEB metadata | WARN | packaging/build-deb.sh still emits placeholder Maintainer metadata. | Replace placeholder maintainer metadata in generated packages and keep generated DEBs separate from official Debian source packaging. |
+| Fedora/EPEL source packaging | BLOCKED | No checked-in Fedora review spec file was found; packaging/build-rpm.sh generates a transient RPM spec. | Add a Fedora-compliant spec, build an SRPM, and validate with rpmlint/mock/fedora-review before Fedora package review. |
+| Generated RPM license metadata | BLOCKED | packaging/build-rpm.sh emits LicenseRef-SSHFling-Commercial. | Change RPM license metadata only after the project license is changed or an explicit redistribution grant is approved. |
+| Package build/test coverage | PASS | Generated DEB/RPM builders, local install validation, and package-install workflow are present. | Keep these as upstream smoke tests while adding distro-native source package tests. |
+
+## Submission Path
+
+1. Resolve the license gate before asking distro maintainers to review the package.
+2. Add Debian source packaging and validate it with `dpkg-buildpackage`, `lintian`, and `autopkgtest`.
+3. File a Debian WNPP/ITP bug, upload to mentors.debian.net, and find a Debian sponsor.
+4. Let Ubuntu sync from Debian when possible; otherwise request Ubuntu sponsorship for a source package.
+5. Add a Fedora-compliant spec and SRPM, validate with `rpmlint`, `mock`, and `fedora-review`, then file Fedora package review.
+6. Request EPEL branches only after Fedora package acceptance.
+
+## Current Decision Gate
+
+The repository is not ready for official Debian/Ubuntu/Fedora/EPEL submission while any `BLOCKED` row remains.

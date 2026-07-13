@@ -13,7 +13,7 @@ ENTERPRISE_RELEASE_OUTPUT_DIR ?= docs/release
 ENTERPRISE_RELEASE_EVIDENCE_DIR ?= docs/release/enterprise-release-evidence
 WEB_LANGUAGE_CONSUMERS ?= react vue svelte angular elm purescript rescript html-css cfml hack
 
-.PHONY: install-local uninstall-local test test-native test-containers test-release-security-scan language-deployment-matrix release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-local release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-readiness-artifacts release-readiness-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg package-dotnet package-java package-node package-python package-go package-rust package-php package-ruby package-native-libraries package-perl package-functional-languages package-systems-languages package-scripting-languages clean
+.PHONY: install-local uninstall-local test test-native test-containers test-release-security-scan official-distro-readiness official-distro-readiness-strict language-deployment-matrix release-package-rehearsal release-assets-evidence release-security-scan release-security-scan-local release-security-scan-optional release-security-scan-strict release-security-evidence-validate release-readiness-artifacts release-readiness-validate release-matrix-validate check-package-version package package-deb package-rpm package-msi package-pkg package-dotnet package-java package-node package-python package-go package-rust package-php package-ruby package-native-libraries package-perl package-functional-languages package-systems-languages package-scripting-languages clean
 .PHONY: package-web-language-consumers package-dart-consumer package-language-catalog package-language-catalog-strict package-scripting-languages audit-domain-languages
 
 install-local:
@@ -35,9 +35,10 @@ uninstall-local:
 	PREFIX="$(PREFIX)" bash scripts/uninstall-local.sh
 
 test:
-	python3 -m py_compile bin/sshfling packaging/python/src/sshfling/__init__.py tools/release_matrix_validate.py tools/generate_release_evidence.py tools/generate_enterprise_release_readiness.py tools/generate_language_deployment_matrix.py tools/generate_language_support_matrix.py tools/release_security_scan.py tools/validate_promoted_language_evidence.py tools/workflow_static_check.py
+	python3 -m py_compile bin/sshfling packaging/python/src/sshfling/__init__.py tools/release_matrix_validate.py tools/generate_release_evidence.py tools/generate_enterprise_release_readiness.py tools/generate_language_deployment_matrix.py tools/generate_language_support_matrix.py tools/official_distro_readiness.py tools/release_security_scan.py tools/validate_promoted_language_evidence.py tools/workflow_static_check.py
 	python3 tools/generate_language_support_matrix.py --check
 	python3 tools/generate_language_deployment_matrix.py --check
+	python3 tools/official_distro_readiness.py --check
 	python3 -m unittest discover -s tests/release -p 'test_*.py'
 	python3 -m unittest discover -s tests/sshfling -p 'test_*.py'
 	@if command -v node >/dev/null 2>&1; then node --check packaging/node/index.js && node --check packaging/node/bin/sshfling.js; fi
@@ -71,6 +72,12 @@ test-containers:
 
 test-release-security-scan:
 	python3 -m unittest discover -s tests/release -p 'test_*.py'
+
+official-distro-readiness:
+	python3 tools/official_distro_readiness.py --write
+
+official-distro-readiness-strict:
+	python3 tools/official_distro_readiness.py --check --fail-on-blocked
 
 language-deployment-matrix:
 	python3 tools/generate_language_deployment_matrix.py --write --update-todo

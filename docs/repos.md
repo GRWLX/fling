@@ -371,7 +371,13 @@ The Pages workflow also generates ready-to-use or ready-to-submit package defini
 - winget: `winget/manifests/g/OWNER/SSHFling/VERSION`
 - Chocolatey: `chocolatey/sshfling.VERSION.nupkg`
 
-Some of these can be installed directly from the generated URL, while official/community repositories still require a maintainer account, review, signing, or a pull request into the upstream repository.
+Some of these can be installed directly from the generated URL, while
+official/community repositories still require a maintainer account, review,
+signing, or a pull request into the upstream repository. For Debian, Ubuntu,
+Fedora, and EPEL specifically, track the current blockers in
+[Official Distro Repository Readiness](official-distro-readiness.md); generated
+DEB/RPM artifacts are upstream package outputs, not official distro source
+packages.
 
 The full build target matrix is tracked in [build-targets.md](build-targets.md). The public package workflow runs `packaging/verify-public-web.sh` before publishing so every declared target has a generated package, repo file, or manifest.
 
