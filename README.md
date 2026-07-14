@@ -662,27 +662,39 @@ GitHub Actions workflows are included for public distribution:
   24-hour cap, copied service templates, active-session PID fields,
   transfer command construction, and detached job PID lifecycle.
 
-### v0.1.14 Release Readiness
+### v0.1.24 Release Readiness
 
-`v0.1.14` is the current fixed-forward release-prep candidate. It includes
-additional prune safety, CA/certificate gating, OpenSSH dependency checks,
-DEB/RPM service-account identity preservation, macOS/Windows package trust
-gates, and release-evidence updates after the published `v0.1.13` release.
-The previous published release is `v0.1.13` at commit
-`065b03c16a81e9167120e9f41afd4c5e81a79a4a`.
+`v0.1.24` is the current package/publication candidate. It supersedes
+`v0.1.23`, refreshes release metadata after Windows package validation
+hardening, and has attached official Debian/Fedora review assets:
 
-`v0.1.12` shipped enterprise package publishing preparation: package builders,
-public package-site verification, repository registration docs, community
-manifest generation, release checklist/evidence templates, cross-OS/package
-install validation, release matrix tooling, and enterprise operations docs.
+- GitHub prerelease: `https://github.com/GRWLX/sshfling/releases/tag/v0.1.24`
+- Source commit: `fddb69753572540c8a048f375dd3dcb2919cd048`
+- Java package publication and verification:
+  `https://github.com/GRWLX/sshfling/actions/runs/29301204832`
+- GHCR client/server image publication and signing:
+  `https://github.com/GRWLX/sshfling/actions/runs/29301204814`
+- Public package-site dry run with generated test signing key:
+  `https://github.com/GRWLX/sshfling/actions/runs/29300731419`
+- Official distro draft validation:
+  `https://github.com/GRWLX/sshfling/actions/runs/29300728065`
+- Language runtime validation:
+  `https://github.com/GRWLX/sshfling/actions/runs/29300728064`
+- Container image tests:
+  `https://github.com/GRWLX/sshfling/actions/runs/29300728052`
 
-Do not treat `v0.1.14` as enterprise-ready or published until release evidence
-is attached for the final commit: release approval, protected tag or equivalent
-change-control evidence, workflow run URLs, artifact checksums, repository
-signing fingerprint, Pages deployment ID where package-site publishing is in
-scope, runtime behavior evidence for password, certificate, access-level,
-transfer, prune, and uninstall behavior, and macOS/Windows signing or
-notarization evidence where applicable.
+The `v0.1.24` tag release-package workflows intentionally fail closed at the
+Windows Authenticode and macOS signing/notarization gates until production
+credentials are configured:
+
+- With public web: `https://github.com/GRWLX/sshfling/actions/runs/29301204872`
+- Without web: `https://github.com/GRWLX/sshfling/actions/runs/29301204877`
+
+The current signing and official distro submission handoff is in
+[Release Signing and Official Distro Handoff](docs/release-signing-and-distro-handoff.md).
+Do not treat signed Windows/macOS installers or production package-web
+publishing as complete until the signing tracker is resolved and a new patch tag
+is cut from `main`.
 
 Release evidence generation and validation commands:
 
@@ -691,10 +703,10 @@ git status --short --branch
 make clean
 make test
 make test-containers
-make release-security-scan-strict VERSION=0.1.14
+make release-security-scan-strict VERSION=0.1.24
 make release-security-evidence-validate RELEASE_MATRIX_VALIDATE_FLAGS=--require-pass
-make package VERSION=0.1.14
-make release-assets-evidence VERSION=0.1.14
+make package VERSION=0.1.24
+make release-assets-evidence VERSION=0.1.24
 make release-matrix-validate \
   RELEASE_MATRIX=docs/release/enterprise-release-evidence/generated/release-assets-matrix.csv \
   RELEASE_MANIFEST=docs/release/enterprise-release-evidence/generated/release-assets-manifest.json \
