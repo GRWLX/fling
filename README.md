@@ -4,7 +4,32 @@
 
 ## Install
 
-Debian or Ubuntu:
+The long-term distro repository target is a normal package-manager install with
+no project bootstrap. Use these commands after the package is accepted into the
+enabled distribution repository:
+
+```bash
+# Debian or Ubuntu
+sudo apt update
+sudo apt install -y sshfling
+
+# Fedora
+sudo dnf install -y sshfling
+
+# RHEL-family hosts after the accepted EPEL or compatible repo is enabled
+sudo dnf install -y sshfling
+
+# Older yum-only RHEL-family hosts after the accepted repo is enabled
+sudo yum install -y sshfling
+```
+
+Official Debian, Ubuntu, Fedora, and EPEL submission is still an external review
+process. Until those packages are accepted, use the current SSHFling signed
+package repository. Additional post-acceptance targets such as openSUSE
+`zypper`, Alpine `apk`, and BSD `pkg`/`pkg_add` are listed in the
+[Install and uninstall runbook](docs/install-uninstall.md).
+
+Debian or Ubuntu from the SSHFling package repository:
 
 ```bash
 tmp="$(mktemp -d)"
@@ -14,7 +39,8 @@ bash "$tmp/install.sh" apt
 sshfling --version
 ```
 
-RHEL, Fedora, Rocky Linux, AlmaLinux, or UBI:
+RHEL, Fedora, Rocky Linux, AlmaLinux, or UBI from the SSHFling package
+repository:
 
 ```bash
 tmp="$(mktemp -d)"

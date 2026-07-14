@@ -92,6 +92,47 @@ favors a forced, traceable login path over restoring files while a managed
 passwd entry survives; resolve the identity mismatch or deletion failure before
 removing those files.
 
+## Distro-Managed Repository Targets
+
+Use these commands only after SSHFling has been accepted into the relevant
+distribution repository and that repository is enabled on the host. They are the
+post-review target for official Debian, Ubuntu, Fedora, EPEL, and similar
+channels; the current upstream GitHub Pages package repository remains
+documented in the sections below.
+
+```bash
+# Debian or Ubuntu
+sudo apt update
+sudo apt install -y sshfling
+
+# Fedora
+sudo dnf install -y sshfling
+
+# RHEL, Rocky Linux, AlmaLinux, CentOS, or UBI with accepted EPEL or
+# compatible repository enabled
+sudo dnf install -y sshfling
+
+# Older yum-only RHEL-family hosts with the accepted repository enabled
+sudo yum install -y sshfling
+
+# openSUSE after OBS publication
+sudo zypper install sshfling
+
+# Alpine after package acceptance
+sudo apk add sshfling
+
+# FreeBSD after ports/package acceptance
+sudo pkg install sshfling
+
+# OpenBSD after ports/package acceptance
+doas pkg_add sshfling
+```
+
+Do not replace the upstream signed repository registration commands with these
+until the relevant distribution review has completed, otherwise clean installs
+will fail because the package name is not yet available from that package
+manager's enabled repositories.
+
 ## Linux DEB Package
 
 Use this path for a local `.deb` artifact or a package downloaded from the
